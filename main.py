@@ -3,9 +3,19 @@ import os
 import tempfile
 from datetime import datetime
 import requests
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
-import torch
-import librosa
+import warnings
+
+# Suppression des avertissements pour un affichage plus propre
+warnings.filterwarnings("ignore")
+
+# Import conditionnel pour éviter les erreurs au démarrage
+try:
+    from transformers import WhisperProcessor, WhisperForConditionalGeneration
+    import torch
+    import librosa
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
 
 
 st.set_page_config(page_title="Outil de Transcription de Réunion", page_icon=":microphone:", layout="wide")
@@ -13,6 +23,10 @@ st.set_page_config(page_title="Outil de Transcription de Réunion", page_icon=":
 
 def transcribe_audio(audio_file, file_extension, model_size="base"):
     """Transcrit le fichier audio téléchargé en texte en utilisant le modèle Whisper de Hugging Face"""
+    
+    if not WHISPER_AVAILABLE:
+        st.error("Les bibliothèques nécessaires (transformers, torch, librosa) ne sont pas disponibles. Veuillez vérifier votre installation.")
+        return "Erreur: Dépendances manquantes pour la transcription audio"
 
     # Création d'un fichier temporaire avec la bonne extension
     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_audio:
@@ -30,36 +44,50 @@ def transcribe_audio(audio_file, file_extension, model_size="base"):
         }
         model_id = model_id_mapping.get(model_size, "openai/whisper-base")
         
-        # Chargement de l'audio
-        speech_array, sampling_rate = librosa.load(temp_audio_path, sr=16000)
+        try:
+            # Chargement de l'audio avec gestion d'erreur
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                speech_array, sampling_rate = librosa.load(temp_audio_path, sr=16000)
+        except Exception as audio_err:
+            st.error(f"Erreur lors du chargement de l'audio: {audio_err}")
+            return f"Erreur lors du chargement de l'audio: {audio_err}"
         
-        # Chargement du processeur et du modèle depuis Hugging Face
-        processor = WhisperProcessor.from_pretrained(model_id)
-        model = WhisperForConditionalGeneration.from_pretrained(model_id)
+        try:
+            # Chargement du processeur et du modèle depuis Hugging Face
+            processor = WhisperProcessor.from_pretrained(model_id)
+            model = WhisperForConditionalGeneration.from_pretrained(model_id)
+            
+            # Utilisation du GPU si disponible
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            model = model.to(device)
+            
+            # Traitement de l'audio
+            input_features = processor(speech_array, sampling_rate=16000, return_tensors="pt").input_features
+            input_features = input_features.to(device)
+            
+            # Génération des IDs de tokens
+            predicted_ids = model.generate(input_features)
+            
+            # Décodage des IDs de tokens en texte
+            transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+            
+            return transcription
         
-        # Utilisation du GPU si disponible
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        model = model.to(device)
-        
-        # Traitement de l'audio
-        input_features = processor(speech_array, sampling_rate=16000, return_tensors="pt").input_features
-        input_features = input_features.to(device)
-        
-        # Génération des IDs de tokens
-        predicted_ids = model.generate(input_features)
-        
-        # Décodage des IDs de tokens en texte
-        transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
-        
-        return transcription
+        except Exception as model_err:
+            st.error(f"Erreur lors du traitement avec Whisper: {model_err}")
+            return f"Erreur lors du traitement avec Whisper: {model_err}"
 
     except Exception as e:
         st.error(f"Erreur lors de la transcription audio: {e}")
-        return "Erreur lors de la transcription audio"
+        return f"Erreur lors de la transcription audio: {e}"
 
     finally:
         # Nettoyage du fichier temporaire
-        os.unlink(temp_audio_path)
+        try:
+            os.unlink(temp_audio_path)
+        except:
+            pass
 
 
 def format_meeting_notes_with_llm(transcript, meeting_title, date, attendees, template, api_key, action_items=None):
@@ -159,6 +187,19 @@ def format_meeting_notes_fallback(transcript, meeting_title, date, attendees, te
 
 def main():
     st.title("Outil de Transcription Audio de Réunion")
+    
+    # Vérification des dépendances
+    if not WHISPER_AVAILABLE:
+        st.warning("""
+        ⚠️ Certaines dépendances requises ne sont pas disponibles (transformers, torch, librosa).
+        
+        Pour les installer, exécutez:
+        ```
+        pip install transformers torch librosa
+        ```
+        
+        L'application fonctionnera en mode limité sans la fonctionnalité de transcription audio.
+        """)
     
     # Initialisation de l'état pour la clé API et le modèle
     if 'api_key' not in st.session_state:
@@ -386,4 +427,68 @@ def main():
                 )
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Une erreur s'est produite lors du démarrage de l'application: {e}")
+        st.write("""
+        ### Dépannage
+        
+        Si vous rencontrez des erreurs liées à PyTorch ou aux bibliothèques audio, essayez les solutions suivantes:
+        
+        1. Vérifiez que toutes les dépendances sont installées:
+           ```
+           pip install streamlit transformers torch==2.0.1 librosa soundfile
+           ```
+           
+        2. Si vous êtes sur Streamlit Cloud, assurez-vous d'avoir un fichier `requirements.txt` avec les bonnes versions:
+           ```
+           streamlit>=1.24.0
+           transformers>=4.30.0
+           torch==2.0.1
+           librosa>=0.10.0
+           soundfile>=0.12.1
+           requests>=2.28.0
+           ```
+           
+        3. Si les problèmes persistent avec l'audio, essayez d'installer ffmpeg:
+           ```
+           apt-get update && apt-get install -y ffmpeg
+           ```
+        """)
+        
+        # Affichage d'une version minimale de l'interface sans fonctionnalités de transcription audio
+        st.title("Outil de Transcription Audio de Réunion (Mode Secours)")
+        st.warning("Application en mode limité suite à une erreur. La transcription audio n'est pas disponible.")
+        
+        # Interface simplifiée pour la saisie des informations de réunion
+        st.header("Détails de la Réunion")
+        meeting_title = st.text_input("Titre de la Réunion")
+        meeting_date = st.date_input("Date de la Réunion", datetime.now())
+        attendees = st.text_area("Participants (séparés par des virgules)")
+        transcript = st.text_area("Transcription (saisie manuelle)", height=300)
+        
+        # Bouton pour formater les notes
+        if st.button("Formater les Notes de Réunion"):
+            # Format simple pour les notes
+            notes = f"""
+| DATE | DOSSIERS | RÉSOLUTIONS | RESP. | DÉLAI D'EXÉCUTION | DATE D'EXÉCUTION | STATUT | NBR DE REPORT |
+| ---- | -------- | ----------- | ----- | ----------------- | ---------------- | ------ | ------------- |
+| {meeting_date.strftime("%d/%m/%Y")} | {meeting_title} | | | | | En cours | 00 |
+
+## Participants:
+{attendees}
+
+## Transcription:
+{transcript}
+"""
+            st.subheader("Notes de Réunion Formatées")
+            st.text_area("Aperçu:", notes, height=300)
+            
+            # Création d'un bouton de téléchargement pour les notes formatées
+            st.download_button(
+                label="Télécharger les Notes de Réunion",
+                data=notes,
+                file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
+                mime="text/markdown"
+            )
