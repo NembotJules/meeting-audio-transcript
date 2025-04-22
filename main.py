@@ -3,39 +3,63 @@ import os
 import tempfile
 from datetime import datetime
 import requests
-
-import whisper
+from transformers import WhisperProcessor, WhisperForConditionalGeneration
+import torch
+import librosa
 
 
 st.set_page_config(page_title="Meeting Transcription Tool", page_icon=":microphone:", layout="wide")
 
 
 def transcribe_audio(audio_file, file_extension, model_size="base"):
-    """Transcribe the uploaded audio file to text using OpenAI whisper API"""
+    """Transcribe the uploaded audio file to text using Hugging Face Whisper model"""
 
     # Create a temporary file with the correct extension
     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_audio:
         temp_audio.write(audio_file.getvalue())
         temp_audio_path = temp_audio.name
 
-
-    try: 
-        # Loading Whisper model
-        model = whisper.load_model(model_size)
-
-        #Transcription...
-        result = model.transcribe(temp_audio_path)
-        text = result["text"]
+    try:
+        # Map model size to Hugging Face model ID
+        model_id_mapping = {
+            "tiny": "openai/whisper-tiny",
+            "base": "openai/whisper-base",
+            "small": "openai/whisper-small",
+            "medium": "openai/whisper-medium",
+            "large": "openai/whisper-large-v3",
+        }
+        model_id = model_id_mapping.get(model_size, "openai/whisper-base")
+        
+        # Load audio
+        speech_array, sampling_rate = librosa.load(temp_audio_path, sr=16000)
+        
+        # Load processor and model from Hugging Face
+        processor = WhisperProcessor.from_pretrained(model_id)
+        model = WhisperForConditionalGeneration.from_pretrained(model_id)
+        
+        # Use GPU if available
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        model = model.to(device)
+        
+        # Process audio
+        input_features = processor(speech_array, sampling_rate=16000, return_tensors="pt").input_features
+        input_features = input_features.to(device)
+        
+        # Generate token ids
+        predicted_ids = model.generate(input_features)
+        
+        # Decode token ids to text
+        transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+        
+        return transcription
 
     except Exception as e:
         st.error(f"Error transcribing audio: {e}")
-        text = "Error transcribing audio"
+        return "Error transcribing audio"
 
     finally:
         # Clean up the temporary file
         os.unlink(temp_audio_path)
-
-    return text
 
 
 def format_meeting_notes_with_llm(transcript, meeting_title, date, attendees, template, api_key, action_items = None):
@@ -244,7 +268,7 @@ def main():
             st.header("Transcription & Output")
             
             if transcribe_button:
-                with st.spinner("Transcribing audio with OpenAI Whisper..."):
+                with st.spinner(f"Transcribing audio with Whisper {whisper_model} model..."):
                     transcript = transcribe_audio(uploaded_file, file_extension, whisper_model)
                 
                 if transcript:
