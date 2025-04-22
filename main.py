@@ -136,15 +136,12 @@ def format_meeting_notes_fallback(transcript, meeting_title, date, attendees, te
 
 def main():
     st.title("Meeting Audio Transcription Tool")
-
-    # Inititalize state for API key and template
-
+    
+    # Initialize state for API key and template
     if 'api_key' not in st.session_state:
         st.session_state.api_key = ""
-
     if 'template' not in st.session_state:
         st.session_state.template = """
-
 # [MEETING TITLE]
 **Date:** [DATE]
 **Attendees:** [ATTENDEES]
@@ -164,86 +161,80 @@ def main():
 ## Next Steps
 [FOLLOW-UP ACTIONS OR NEXT MEETING]
 """
-
-#Sidebar for uploading and options
-
+    
+    # Sidebar for file upload and options
     with st.sidebar:
         st.header("Upload Audio File")
-        uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "wav", "m4a", "flac"])
-
+        uploaded_file = st.file_uploader("Choose an audio file", type=["wav", "mp3", "m4a", "flac"])
+        
         # Model options
         st.header("Transcription Options")
         whisper_model = st.selectbox(
-            "Whisper Model Size", 
-            ["tiny", "base", "small", "medium", "large"], 
-            index = 1, 
-            help = "Larger models are more accurate but slower"
-      )
+            "Whisper Model Size",
+            ["tiny", "base", "small", "medium", "large"],
+            index=1,
+            help="Larger models are more accurate but slower"
+        )
         
         # API settings
-
         st.header("Deepseek API Settings")
         api_key = st.text_input("Deepseek API Key", 
-                                value = st.session_state.api_key, 
-                                type = "password", 
-                                help = "Enter your Deepseek API key")
-        
-        #Save API key to session state
+                                value=st.session_state.api_key, 
+                                type="password",
+                                help="Enter your Deepseek API key")
+        # Save API key to session state
         st.session_state.api_key = api_key
-
+        
         if uploaded_file is not None:
             file_extension = uploaded_file.name.split('.')[-1].lower()
             st.info(f"File uploaded: {uploaded_file.name}")
-
-            # Button to start transcription
+            
+            # Add a button to start transcription
             transcribe_button = st.button("Transcribe Audio")
-
-            # Main content area with two columns
-            if uploaded_file is not None: 
-                col1, col2 = st.columns(2)
-
-                with col1: 
-                    st.header("Meeting Details")
-                    meeting_title = st.text_input("Meeting Title")
-                    meeting_date = st.date_input("Meeting Date", datetime.now())
-                    attendees = st.text_input("Attendees (comma separated)")
-
-                    # Template customization
-                    st.subheader("Meeting Notes Template")
-                    template = st.text_area("Meeting Notes Template", 
-                                            value = st.session_state.template, 
-                                            height = 300)
-                    
-                    # Save template to session state
-                    st.session_state.template = template
-
-                    #Container for dynamic action items
-                    st.subheader('Action Items')
-                    action_items_container = st.container()
-
-                    #Initialize session state for action items if not already present
-                    if 'action_items' not in st.session_state:
-                        st.session_state.action_items = []
-
-                    #Display all current action items
-                    with action_items_container:
-                        new_action_items = []
-
-                        for i, item in enumerate(st.session_state.action_items):
-                            # For each action item, create a row with text input and delete button
-                            cols = st.columns([0.9, 0.1])
-                            with cols[0]:
-                                new_item = st.text_input(f"Item{i+1}", item, key = f"item_{i}")
-                            
-                            with cols[1]: 
-                                if st.button("X", key = f"del_{i}"):
-                                    pass # Not adding to a new list
-                                else: 
-                                    new_action_items.append(new_item)
-
-                        
-                        # Update session state with filetered list (handles deletions)
-                        st.session_state.action_items = new_action_items if new_action_items else [""]
+    
+    # Main content area with two columns
+    if uploaded_file is not None:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.header("Meeting Details")
+            meeting_title = st.text_input("Meeting Title")
+            meeting_date = st.date_input("Meeting Date", datetime.now())
+            attendees = st.text_area("Attendees (comma separated)")
+            
+            # Template customization
+            st.subheader("Meeting Notes Template")
+            template = st.text_area("Customize Template", 
+                                   value=st.session_state.template, 
+                                   height=250)
+            # Save template to session state
+            st.session_state.template = template
+            
+            # Container for dynamic action items
+            st.subheader("Action Items")
+            action_items_container = st.container()
+            
+            # Initialize session state for action items if not already
+            if 'action_items' not in st.session_state:
+                st.session_state.action_items = [""]
+                
+            # Display all current action items
+            with action_items_container:
+                new_action_items = []
+                
+                for i, item in enumerate(st.session_state.action_items):
+                    # For each action item, create a row with text input and delete button
+                    cols = st.columns([0.9, 0.1])
+                    with cols[0]:
+                        new_item = st.text_input(f"Item {i+1}", item, key=f"item_{i}")
+                    with cols[1]:
+                        if st.button("𝗫", key=f"del_{i}"):
+                            pass  # We'll handle deletion by not adding to new list
+                        else:
+                            new_action_items.append(new_item)
+                
+                # Update session state with filtered list (handles deletions)
+                st.session_state.action_items = new_action_items if new_action_items else [""]
                 
             # Button to add a new action item
             if st.button("Add Action Item"):
@@ -380,14 +371,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-                                                        
-                    
-           
-            
-    # [MEETING TITLE]
-        
-        
-
-
-    
-    
