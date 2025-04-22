@@ -135,6 +135,83 @@ def format_meeting_notes_fallback(transcript, meeting_title, date, attendees, te
     return meeting_notes
 
 
+def main():
+    st.title("Meeting Audio Transcription Tool")
+
+    # Inititalize state for API key and template
+
+    if 'api_key' not in st.session_state:
+        st.session_state.api_key = ""
+
+    if 'template' not in st.session_state:
+        st.session_state.template = """
+
+# [MEETING TITLE]
+**Date:** [DATE]
+**Attendees:** [ATTENDEES]
+
+## Summary
+[BRIEF SUMMARY OF KEY POINTS]
+
+## Discussion Points
+[MAIN DISCUSSION POINTS EXTRACTED FROM TRANSCRIPT]
+
+## Decisions
+[KEY DECISIONS MADE]
+
+## Action Items
+[LIST OF ACTION ITEMS WITH RESPONSIBLE PERSONS]
+
+## Next Steps
+[FOLLOW-UP ACTIONS OR NEXT MEETING]
+"""
+
+#Sidebar for uploading and options
+
+    with st.sidebar:
+        st.header("Upload Audio File")
+        uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "wav", "m4a", "flac"])
+
+        # Model options
+        st.header("Transcription Options")
+        whisper_model = st.selectbox(
+            "Whisper Model Size", 
+            ["tiny", "base", "small", "medium", "large"], 
+            index = 1, 
+            help = "Larger models are more accurate but slower"
+      )
+        
+        # API settings
+
+        st.header("Deepseek API Settings")
+        api_key = st.text_input("Deepseek API Key", 
+                                value = st.session_state.api_key, 
+                                type = "password", 
+                                help = "Enter your Deepseek API key")
+        
+        #Save API key to session state
+        st.session_state.api_key = api_key
+
+        if uploaded_file is not None:
+            file_extension = uploaded_file.name.split('.')[-1].lower()
+            st.info(f"File uploaded: {uploaded_file.name}")
+
+            # Button to start transcription
+            transcribe_button = st.button("Transcribe Audio")
+
+            # Main content area with two columns
+            if uploaded_file is not None: 
+                col1, col2 = st.columns(2)
+
+                with col1: 
+                    st.header("Meeting Details")
+                    meeting_title = st.text_input("Meeting Title")
+           
+            
+    # [MEETING TITLE]
+        
+        
+
 
     
     
