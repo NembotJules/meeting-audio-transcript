@@ -2,11 +2,10 @@ import streamlit as st
 import os
 import tempfile
 from datetime import datetime
-import io
 import whisper
 import requests
-import json
-from pydub import AudioSegment
+
+
 
 
 st.set_page_config(page_title="Meeting Transcription Tool", page_icon=":microphone:", layout="wide")
