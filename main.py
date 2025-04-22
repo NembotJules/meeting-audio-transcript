@@ -206,6 +206,183 @@ def main():
                 with col1: 
                     st.header("Meeting Details")
                     meeting_title = st.text_input("Meeting Title")
+                    meeting_date = st.date_input("Meeting Date", datetime.now())
+                    attendees = st.text_input("Attendees (comma separated)")
+
+                    # Template customization
+                    st.subheader("Meeting Notes Template")
+                    template = st.text_area("Meeting Notes Template", 
+                                            value = st.session_state.template, 
+                                            height = 300)
+                    
+                    # Save template to session state
+                    st.session_state.template = template
+
+                    #Container for dynamic action items
+                    st.subheader('Action Items')
+                    action_items_container = st.container()
+
+                    #Initialize session state for action items if not already present
+                    if 'action_items' not in st.session_state:
+                        st.session_state.action_items = []
+
+                    #Display all current action items
+                    with action_items_container:
+                        new_action_items = []
+
+                        for i, item in enumerate(st.session_state.action_items):
+                            # For each action item, create a row with text input and delete button
+                            cols = st.columns([0.9, 0.1])
+                            with cols[0]:
+                                new_item = st.text_input(f"Item{i+1}", item, key = f"item_{i}")
+                            
+                            with cols[1]: 
+                                if st.button("X", key = f"del_{i}"):
+                                    pass # Not adding to a new list
+                                else: 
+                                    new_action_items.append(new_item)
+
+                        
+                        # Update session state with filetered list (handles deletions)
+                        st.session_state.action_items = new_action_items if new_action_items else [""]
+                
+            # Button to add a new action item
+            if st.button("Add Action Item"):
+                st.session_state.action_items.append("")
+                st.rerun()  # Force refresh to show the new field
+        
+        with col2:
+            st.header("Transcription & Output")
+            
+            if transcribe_button:
+                with st.spinner("Transcribing audio with OpenAI Whisper..."):
+                    transcript = transcribe_audio(uploaded_file, file_extension)
+                
+                if transcript:
+                    st.success("Transcription complete!")
+                    
+                    # Store the transcript in session state
+                    st.session_state.transcript = transcript
+                    
+                    # Display transcription
+                    st.subheader("Raw Transcript")
+                    st.text_area("Edit if needed:", transcript, height=200, key="edited_transcript")
+                    
+                    # Format notes button
+                    if st.button("Format Meeting Notes"):
+                        # Use edited transcript
+                        edited_transcript = st.session_state.get("edited_transcript", transcript)
+                        
+                        # Filter out empty action items
+                        action_items = [item for item in st.session_state.action_items if item.strip()]
+                        
+                        if st.session_state.api_key:
+                            with st.spinner("Formatting with Deepseek LLM..."):
+                                # Format using the LLM
+                                formatted_notes = format_meeting_notes_with_llm(
+                                    edited_transcript,
+                                    meeting_title,
+                                    meeting_date.strftime("%B %d, %Y"),
+                                    attendees,
+                                    st.session_state.template,
+                                    st.session_state.api_key,
+                                    action_items
+                                )
+                        else:
+                            st.warning("No Deepseek API key provided. Using fallback formatter.")
+                            # Format using the fallback formatter
+                            formatted_notes = format_meeting_notes_fallback(
+                                edited_transcript,
+                                meeting_title,
+                                meeting_date.strftime("%B %d, %Y"),
+                                attendees,
+                                action_items
+                            )
+                        
+                        # Store the formatted notes in session state
+                        st.session_state.formatted_notes = formatted_notes
+                        
+                        # Display the formatted notes
+                        st.subheader("Formatted Meeting Notes")
+                        st.text_area("Preview:", formatted_notes, height=300)
+                        
+                        # Create a download button for the formatted notes
+                        st.download_button(
+                            label="Download Meeting Notes",
+                            data=formatted_notes,
+                            file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
+                            mime="text/markdown"
+                        )
+            
+            # If we have already transcribed, show the results
+            elif hasattr(st.session_state, 'transcript'):
+                # Display transcription
+                st.subheader("Raw Transcript")
+                st.text_area("Edit if needed:", st.session_state.transcript, height=200, key="edited_transcript")
+                
+                # Format notes button
+                if st.button("Format Meeting Notes"):
+                    # Use edited transcript
+                    edited_transcript = st.session_state.get("edited_transcript", st.session_state.transcript)
+                    
+                    # Filter out empty action items
+                    action_items = [item for item in st.session_state.action_items if item.strip()]
+                    
+                    if st.session_state.api_key:
+                        with st.spinner("Formatting with Deepseek LLM..."):
+                            # Format using the LLM
+                            formatted_notes = format_meeting_notes_with_llm(
+                                edited_transcript,
+                                meeting_title,
+                                meeting_date.strftime("%B %d, %Y"),
+                                attendees,
+                                st.session_state.template,
+                                st.session_state.api_key,
+                                action_items
+                            )
+                    else:
+                        st.warning("No Deepseek API key provided. Using fallback formatter.")
+                        # Format using the fallback formatter
+                        formatted_notes = format_meeting_notes_fallback(
+                            edited_transcript,
+                            meeting_title,
+                            meeting_date.strftime("%B %d, %Y"),
+                            attendees,
+                            action_items
+                        )
+                    
+                    # Store the formatted notes in session state
+                    st.session_state.formatted_notes = formatted_notes
+                    
+                    # Display the formatted notes
+                    st.subheader("Formatted Meeting Notes")
+                    st.text_area("Preview:", formatted_notes, height=300)
+                    
+                    # Create a download button for the formatted notes
+                    st.download_button(
+                        label="Download Meeting Notes",
+                        data=formatted_notes,
+                        file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
+                        mime="text/markdown"
+                    )
+            
+            # If we already have formatted notes, show them
+            elif hasattr(st.session_state, 'formatted_notes'):
+                st.subheader("Formatted Meeting Notes")
+                st.text_area("Preview:", st.session_state.formatted_notes, height=300)
+                
+                # Create a download button for the formatted notes
+                st.download_button(
+                    label="Download Meeting Notes",
+                    data=st.session_state.formatted_notes,
+                    file_name=f"meeting_notes_{datetime.now().strftime('%Y-%m-%d')}.md",
+                    mime="text/markdown"
+                )
+
+if __name__ == "__main__":
+    main()
+                                                        
+                    
            
             
     # [MEETING TITLE]
