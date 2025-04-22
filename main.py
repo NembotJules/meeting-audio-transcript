@@ -2,17 +2,15 @@ import streamlit as st
 import os
 import tempfile
 from datetime import datetime
-import whisper
 import requests
 
-
+import whisper
 
 
 st.set_page_config(page_title="Meeting Transcription Tool", page_icon=":microphone:", layout="wide")
 
 
-
-def transcribe_audio(audio_file, file_extension):
+def transcribe_audio(audio_file, file_extension, model_size="base"):
     """Transcribe the uploaded audio file to text using OpenAI whisper API"""
 
     # Create a temporary file with the correct extension
@@ -22,8 +20,8 @@ def transcribe_audio(audio_file, file_extension):
 
 
     try: 
-        # Loading Whisper model (base model)
-        model = whisper.load_model("base")
+        # Loading Whisper model
+        model = whisper.load_model(model_size)
 
         #Transcription...
         result = model.transcribe(temp_audio_path)
@@ -111,7 +109,7 @@ def format_meeting_notes_with_llm(transcript, meeting_title, date, attendees, te
         return format_meeting_notes_fallback(transcript, meeting_title, date, attendees, template, action_items)
     
 
-def format_meeting_notes_fallback(transcript, meeting_title, date, attendees, template, action_items):
+def format_meeting_notes_fallback(transcript, meeting_title, date, attendees, template, action_items=None):
     """Fallback formatter if the LLM call fails"""
 
     # Format the template
@@ -119,17 +117,18 @@ def format_meeting_notes_fallback(transcript, meeting_title, date, attendees, te
     # {meeting_title}
     # {date}
     # Attendees: {attendees}
-    # Action Items:
-    {action_items}
     """
 
     # Add action items if they exist
+    meeting_notes += "\n# Action Items:\n"
     if action_items:
        for idx, item in enumerate(action_items, 1):
            meeting_notes += f"{idx}. {item}\n"
-
     else: 
         meeting_notes += "No action items were captured during the meeting."
+    
+    # Add transcript
+    meeting_notes += f"\n# Transcript:\n{transcript}"
 
     return meeting_notes
 
@@ -246,7 +245,7 @@ def main():
             
             if transcribe_button:
                 with st.spinner("Transcribing audio with OpenAI Whisper..."):
-                    transcript = transcribe_audio(uploaded_file, file_extension)
+                    transcript = transcribe_audio(uploaded_file, file_extension, whisper_model)
                 
                 if transcript:
                     st.success("Transcription complete!")
@@ -286,6 +285,7 @@ def main():
                                 meeting_title,
                                 meeting_date.strftime("%B %d, %Y"),
                                 attendees,
+                                st.session_state.template,
                                 action_items
                             )
                         
@@ -338,6 +338,7 @@ def main():
                             meeting_title,
                             meeting_date.strftime("%B %d, %Y"),
                             attendees,
+                            st.session_state.template,
                             action_items
                         )
                     
