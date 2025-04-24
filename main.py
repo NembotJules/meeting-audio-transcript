@@ -5,8 +5,6 @@ from datetime import datetime
 import requests
 import warnings
 import sys
-from streamlit.web import cli as stcli
-from streamlit import runtime
 # Patch to avoid the PyTorch custom classes error...
 if 'torch.classes' in sys.modules:
     del sys.modules['torch.classes']
@@ -498,11 +496,3 @@ if __name__ == "__main__":
                 file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
                 mime="text/markdown"
             )
-
-
-if __name__ == '__main__':
-    if runtime.exists():
-        main()
-    else:
-        sys.argv = ["streamlit", "run", sys.argv[0], "--server.fileWatcherType=none"]
-        sys.exit(stcli.main())
