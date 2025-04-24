@@ -5,7 +5,7 @@ from datetime import datetime
 import requests
 import warnings
 import sys
-# Patch to avoid the PyTorch custom classes error
+# Patch to avoid the PyTorch custom classes error...
 if 'torch.classes' in sys.modules:
     del sys.modules['torch.classes']
 
