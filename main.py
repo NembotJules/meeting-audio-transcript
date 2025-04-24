@@ -6,7 +6,7 @@ import requests
 import warnings
 import sys
 from streamlit.web import cli as stcli
-from streamlit.runtime import runtime
+from streamlit import runtime
 # Patch to avoid the PyTorch custom classes error...
 if 'torch.classes' in sys.modules:
     del sys.modules['torch.classes']
