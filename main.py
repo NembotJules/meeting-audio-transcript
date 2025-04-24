@@ -4,6 +4,10 @@ import tempfile
 from datetime import datetime
 import requests
 import warnings
+import sys
+# Patch to avoid the PyTorch custom classes error
+if 'torch.classes' in sys.modules:
+    del sys.modules['torch.classes']
 
 # Suppression des avertissements pour un affichage plus propre
 warnings.filterwarnings("ignore")
