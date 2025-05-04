@@ -6,22 +6,55 @@ import requests
 from transformers import pipeline
 from docx import Document
 import warnings
+import torch
+import torchaudio
 
 # Suppression des avertissements pour un affichage plus propre
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Outil de Transcription de Réunion", page_icon=":microphone:", layout="wide")
 
-def transcribe_audio(audio_file, file_extension):
+def transcribe_audio(audio_file, file_extension, model_size="base"):
     """Transcrit le fichier audio téléchargé en texte en utilisant le modèle Whisper"""
     try:
-        transcriber = pipeline("automatic-speech-recognition", model="openai/whisper-base")
+        # Définir le modèle Whisper
+        model_id_mapping = {
+            "tiny": "openai/whisper-tiny",
+            "base": "openai/whisper-base",
+            "small": "openai/whisper-small",
+            "medium": "openai/whisper-medium",
+            "large": "openai/whisper-large-v3",
+        }
+        model_id = model_id_mapping.get(model_size, "openai/whisper-base")
+        
+        # Charger le pipeline Whisper
+        transcriber = pipeline("automatic-speech-recognition", model=model_id)
+        
+        # Créer un fichier temporaire
         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_audio:
             temp_audio.write(audio_file.getvalue())
             temp_audio_path = temp_audio.name
-        result = transcriber(temp_audio_path, chunk_length_s=30, stride_length_s=5)
-        os.unlink(temp_audio_path)
-        return result["text"]
+        
+        try:
+            # Charger l'audio avec torchaudio
+            waveform, sample_rate = torchaudio.load(temp_audio_path, backend="ffmpeg")
+            
+            # Whisper exige un taux d'échantillonnage de 16 kHz
+            if sample_rate != 16000:
+                waveform = torchaudio.functional.resample(waveform, sample_rate, 16000)
+            
+            # Convertir la waveform en un tenseur utilisable par Whisper
+            # Si l'audio est stéréo (2 canaux), convertir en mono en prenant la moyenne
+            if waveform.shape[0] > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+            
+            # Transcrire l'audio
+            result = transcriber({"raw": waveform[0].numpy(), "sampling_rate": 16000}, chunk_length_s=30, stride_length_s=5)
+            return result["text"]
+        
+        finally:
+            os.unlink(temp_audio_path)
+    
     except Exception as e:
         st.error(f"Erreur lors de la transcription audio: {e}")
         return f"Erreur lors de la transcription audio: {e}"
@@ -135,7 +168,6 @@ def generate_word_document(extracted_info, meeting_title, date):
             doc.add_heading(heading, level=1)
             content = "\n".join(lines[1:]).strip()
             if heading == "Résolutions" and content.startswith("|"):
-                # Gérer le tableau des résolutions
                 table_data = [row.split("|")[1:-1] for row in content.split("\n") if row.startswith("|")]
                 table = doc.add_table(rows=len(table_data), cols=len(table_data[0]))
                 table.style = "Table Grid"
@@ -162,8 +194,9 @@ def main():
     except ImportError:
         WHISPER_AVAILABLE = False
         st.warning("""
-        ⚠️ Les dépendances nécessaires (transformers, torch) ne sont pas installées.
-        Exécutez : `pip install transformers torch`
+        ⚠️ Les dépendances nécessaires (transformers, torch, torchaudio) ne sont pas installées.
+        Exécutez : `pip install transformers torch torchaudio`
+        Assurez-vous que ffmpeg est installé : https://ffmpeg.org/download.html
         """)
     
     try:
@@ -239,7 +272,7 @@ def main():
             
             if transcribe_button and WHISPER_AVAILABLE:
                 with st.spinner(f"Transcription audio avec le modèle Whisper {whisper_model}..."):
-                    transcription = transcribe_audio(uploaded_file, file_extension)
+                    transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
                 
                 if transcription and not transcription.startswith("Erreur"):
                     st.success("Transcription terminée!")
@@ -366,13 +399,14 @@ if __name__ == "__main__":
         Si vous rencontrez des erreurs, essayez les solutions suivantes :
         1. Installez toutes les dépendances :
            ```
-           pip install streamlit transformers torch python-docx requests
+           pip install streamlit transformers torch torchaudio python-docx requests
            ```
         2. Pour Streamlit Cloud, assurez-vous d'avoir un fichier `requirements.txt` :
            ```
            streamlit>=1.24.0
            transformers>=4.30.0
            torch>=2.0.1
+           torchaudio>=2.0.2
            python-docx>=0.8.11
            requests>=2.28.0
            ```
