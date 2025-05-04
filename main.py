@@ -14,85 +14,66 @@ warnings.filterwarnings("ignore")
 
 # Import conditionnel pour éviter les erreurs au démarrage
 try:
-    from transformers import WhisperProcessor, WhisperForConditionalGeneration
+    from transformers import pipeline
     import torch
-    import librosa
     WHISPER_AVAILABLE = True
 except ImportError:
     WHISPER_AVAILABLE = False
 
+# Ajout pour markdowntodocx
+try:
+    from markdowntodocx import markdown_to_docx
+    MARKDOWN_TO_DOCX_AVAILABLE = True
+except ImportError:
+    MARKDOWN_TO_DOCX_AVAILABLE = False
 
 st.set_page_config(page_title="Outil de Transcription de Réunion", page_icon=":microphone:", layout="wide")
-
 
 def transcribe_audio(audio_file, file_extension, model_size="base"):
     """Transcrit le fichier audio téléchargé en texte en utilisant le modèle Whisper de Hugging Face"""
     
     if not WHISPER_AVAILABLE:
-        st.error("Les bibliothèques nécessaires (transformers, torch, librosa) ne sont pas disponibles. Veuillez vérifier votre installation.")
+        st.error("Les bibliothèques nécessaires (transformers, torch) ne sont pas disponibles. Veuillez vérifier votre installation.")
         return "Erreur: Dépendances manquantes pour la transcription audio"
 
+    # Correspondance entre la taille du modèle et l'ID du modèle Hugging Face
+    model_id_mapping = {
+        "tiny": "openai/whisper-tiny",
+        "base": "openai/whisper-base",
+        "small": "openai/whisper-small",
+        "medium": "openai/whisper-medium",
+        "large": "openai/whisper-large-v3",
+    }
+    model_id = model_id_mapping.get(model_size, "openai/whisper-base")
+    
     # Création d'un fichier temporaire avec la bonne extension
     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_audio:
         temp_audio.write(audio_file.getvalue())
         temp_audio_path = temp_audio.name
-
+    
     try:
-        # Correspondance entre la taille du modèle et l'ID du modèle Hugging Face
-        model_id_mapping = {
-            "tiny": "openai/whisper-tiny",
-            "base": "openai/whisper-base",
-            "small": "openai/whisper-small",
-            "medium": "openai/whisper-medium",
-            "large": "openai/whisper-large-v3",
-        }
-        model_id = model_id_mapping.get(model_size, "openai/whisper-base")
+        # Utilisation du GPU si disponible
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
         
-        try:
-            # Chargement de l'audio avec gestion d'erreur
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                speech_array, sampling_rate = librosa.load(temp_audio_path, sr=16000)
-        except Exception as audio_err:
-            st.error(f"Erreur lors du chargement de l'audio: {audio_err}")
-            return f"Erreur lors du chargement de l'audio: {audio_err}"
+        # Création du pipeline Whisper
+        pipe = pipeline("automatic-speech-recognition", model=model_id, device=device)
         
-        try:
-            # Chargement du processeur et du modèle depuis Hugging Face
-            processor = WhisperProcessor.from_pretrained(model_id)
-            model = WhisperForConditionalGeneration.from_pretrained(model_id)
-            
-            # Utilisation du GPU si disponible
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
-            model = model.to(device)
-            
-            # Traitement de l'audio
-            input_features = processor(speech_array, sampling_rate=16000, return_tensors="pt").input_features
-            input_features = input_features.to(device)
-            
-            # Génération des IDs de tokens
-            predicted_ids = model.generate(input_features)
-            
-            # Décodage des IDs de tokens en texte
-            transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
-            
-            return transcription
+        # Transcription de l'audio avec chunking pour les audios longs
+        result = pipe(temp_audio_path, chunk_length_s=30, stride_length_s=5)
+        transcription = result["text"]
         
-        except Exception as model_err:
-            st.error(f"Erreur lors du traitement avec Whisper: {model_err}")
-            return f"Erreur lors du traitement avec Whisper: {model_err}"
-
+        return transcription
+    
     except Exception as e:
         st.error(f"Erreur lors de la transcription audio: {e}")
         return f"Erreur lors de la transcription audio: {e}"
-
+    
     finally:
         # Nettoyage du fichier temporaire
         try:
             os.unlink(temp_audio_path)
         except:
             pass
-
 
 def format_meeting_notes_with_llm(transcript, meeting_title, date, attendees, template, api_key, action_items=None):
     """Formate la transcription en notes de réunion en utilisant l'API Deepseek"""
@@ -195,11 +176,11 @@ def main():
     # Vérification des dépendances
     if not WHISPER_AVAILABLE:
         st.warning("""
-        ⚠️ Certaines dépendances requises ne sont pas disponibles (transformers, torch, librosa).
+        ⚠️ Certaines dépendances requises ne sont pas disponibles (transformers, torch).
         
         Pour les installer, exécutez:
         ```
-        pip install transformers torch librosa
+        pip install transformers torch
         ```
         
         L'application fonctionnera en mode limité sans la fonctionnalité de transcription audio.
@@ -356,13 +337,43 @@ def main():
                         st.subheader("Notes de Réunion Formatées")
                         st.text_area("Aperçu:", formatted_notes, height=300)
                         
-                        # Création d'un bouton de téléchargement pour les notes formatées
-                        st.download_button(
-                            label="Télécharger les Notes de Réunion",
-                            data=formatted_notes,
-                            file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
-                            mime="text/markdown"
-                        )
+                        # Téléchargement des notes
+                        if formatted_notes:
+                            if MARKDOWN_TO_DOCX_AVAILABLE:
+                                # Créer des fichiers temporaires pour Markdown et DOCX
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as tmp_md:
+                                    tmp_md.write(formatted_notes.encode())
+                                    tmp_md_path = tmp_md.name
+                                
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
+                                    tmp_docx_path = tmp_docx.name
+                                
+                                # Convertir Markdown en DOCX
+                                markdown_to_docx(tmp_md_path, tmp_docx_path)
+                                
+                                # Lire le fichier DOCX en mémoire
+                                with open(tmp_docx_path, "rb") as f:
+                                    docx_data = f.read()
+                                
+                                # Télécharger le fichier DOCX
+                                st.download_button(
+                                    label="Télécharger les Notes de Réunion",
+                                    data=docx_data,
+                                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                )
+                                
+                                # Nettoyer les fichiers temporaires
+                                os.unlink(tmp_md_path)
+                                os.unlink(tmp_docx_path)
+                            else:
+                                st.warning("markdowntodocx n'est pas installé. Téléchargement au format Markdown.")
+                                st.download_button(
+                                    label="Télécharger les Notes de Réunion",
+                                    data=formatted_notes,
+                                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
+                                    mime="text/markdown"
+                                )
             
             # Si nous avons déjà transcrit, affichage des résultats
             elif hasattr(st.session_state, 'transcript'):
@@ -409,26 +420,86 @@ def main():
                     st.subheader("Notes de Réunion Formatées")
                     st.text_area("Aperçu:", formatted_notes, height=300)
                     
-                    # Création d'un bouton de téléchargement pour les notes formatées
-                    st.download_button(
-                        label="Télécharger les Notes de Réunion",
-                        data=formatted_notes,
-                        file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
-                        mime="text/markdown"
-                    )
+                    # Téléchargement des notes
+                    if formatted_notes:
+                        if MARKDOWN_TO_DOCX_AVAILABLE:
+                            # Créer des fichiers temporaires pour Markdown et DOCX
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as tmp_md:
+                                tmp_md.write(formatted_notes.encode())
+                                tmp_md_path = tmp_md.name
+                            
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
+                                tmp_docx_path = tmp_docx.name
+                            
+                            # Convertir Markdown en DOCX
+                            markdown_to_docx(tmp_md_path, tmp_docx_path)
+                            
+                            # Lire le fichier DOCX en mémoire
+                            with open(tmp_docx_path, "rb") as f:
+                                docx_data = f.read()
+                            
+                            # Télécharger le fichier DOCX
+                            st.download_button(
+                                label="Télécharger les Notes de Réunion",
+                                data=docx_data,
+                                file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            )
+                            
+                            # Nettoyer les fichiers temporaires
+                            os.unlink(tmp_md_path)
+                            os.unlink(tmp_docx_path)
+                        else:
+                            st.warning("markdowntodocx n'est pas installé. Téléchargement au format Markdown.")
+                            st.download_button(
+                                label="Télécharger les Notes de Réunion",
+                                data=formatted_notes,
+                                file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
+                                mime="text/markdown"
+                            )
             
             # Si nous avons déjà des notes formatées, les afficher
             elif hasattr(st.session_state, 'formatted_notes'):
                 st.subheader("Notes de Réunion Formatées")
                 st.text_area("Aperçu:", st.session_state.formatted_notes, height=300)
                 
-                # Création d'un bouton de téléchargement pour les notes formatées
-                st.download_button(
-                    label="Télécharger les Notes de Réunion",
-                    data=st.session_state.formatted_notes,
-                    file_name=f"notes_reunion_{datetime.now().strftime('%Y-%m-%d')}.md",
-                    mime="text/markdown"
-                )
+                # Téléchargement des notes
+                formatted_notes = st.session_state.formatted_notes
+                if MARKDOWN_TO_DOCX_AVAILABLE:
+                    # Créer des fichiers temporaires pour Markdown et DOCX
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as tmp_md:
+                        tmp_md.write(formatted_notes.encode())
+                        tmp_md_path = tmp_md.name
+                    
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
+                        tmp_docx_path = tmp_docx.name
+                    
+                    # Convertir Markdown en DOCX
+                    markdown_to_docx(tmp_md_path, tmp_docx_path)
+                    
+                    # Lire le fichier DOCX en mémoire
+                    with open(tmp_docx_path, "rb") as f:
+                        docx_data = f.read()
+                    
+                    # Télécharger le fichier DOCX
+                    st.download_button(
+                        label="Télécharger les Notes de Réunion",
+                        data=docx_data,
+                        file_name=f"notes_reunion_{datetime.now().strftime('%Y-%m-%d')}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+                    
+                    # Nettoyer les fichiers temporaires
+                    os.unlink(tmp_md_path)
+                    os.unlink(tmp_docx_path)
+                else:
+                    st.warning("markdowntodocx n'est pas installé. Téléchargement au format Markdown.")
+                    st.download_button(
+                        label="Télécharger les Notes de Réunion",
+                        data=formatted_notes,
+                        file_name=f"notes_reunion_{datetime.now().strftime('%Y-%m-%d')}.md",
+                        mime="text/markdown"
+                    )
 
 if __name__ == "__main__":
     try:
@@ -438,11 +509,12 @@ if __name__ == "__main__":
         st.write("""
         ### Dépannage
         
-        Si vous rencontrez des erreurs liées à PyTorch ou aux bibliothèques audio, essayez les solutions suivantes:
+        Si vous rencontrez des erreurs liées à PyTorchInsn1
+        PyTorch ou aux bibliothèques audio, essayez les solutions suivantes:
         
         1. Vérifiez que toutes les dépendances sont installées:
            ```
-           pip install streamlit transformers torch==2.0.1 librosa soundfile
+           pip install streamlit transformers torch==2.0.1 markdowntodocx
            ```
            
         2. Si vous êtes sur Streamlit Cloud, assurez-vous d'avoir un fichier `requirements.txt` avec les bonnes versions:
@@ -450,14 +522,8 @@ if __name__ == "__main__":
            streamlit>=1.24.0
            transformers>=4.30.0
            torch==2.0.1
-           librosa>=0.10.0
-           soundfile>=0.12.1
+           markdowntodocx
            requests>=2.28.0
-           ```
-           
-        3. Si les problèmes persistent avec l'audio, essayez d'installer ffmpeg:
-           ```
-           apt-get update && apt-get install -y ffmpeg
            ```
         """)
         
@@ -489,10 +555,39 @@ if __name__ == "__main__":
             st.subheader("Notes de Réunion Formatées")
             st.text_area("Aperçu:", notes, height=300)
             
-            # Création d'un bouton de téléchargement pour les notes formatées
-            st.download_button(
-                label="Télécharger les Notes de Réunion",
-                data=notes,
-                file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
-                mime="text/markdown"
-            )
+            # Téléchargement des notes
+            if MARKDOWN_TO_DOCX_AVAILABLE:
+                # Créer des fichiers temporaires pour Markdown et DOCX
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as tmp_md:
+                    tmp_md.write(notes.encode())
+                    tmp_md_path = tmp_md.name
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
+                    tmp_docx_path = tmp_docx.name
+                
+                # Convertir Markdown en DOCX
+                markdown_to_docx(tmp_md_path, tmp_docx_path)
+                
+                # Lire le fichier DOCX en mémoire
+                with open(tmp_docx_path, "rb") as f:
+                    docx_data = f.read()
+                
+                # Télécharger le fichier DOCX
+                st.download_button(
+                    label="Télécharger les Notes de Réunion",
+                    data=docx_data,
+                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+                
+                # Nettoyer les fichiers temporaires
+                os.unlink(tmp_md_path)
+                os.unlink(tmp_docx_path)
+            else:
+                st.warning("markdowntodocx n'est pas installé. Téléchargement au format Markdown.")
+                st.download_button(
+                    label="Télécharger les Notes de Réunion",
+                    data=notes,
+                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
+                    mime="text/markdown"
+                )
