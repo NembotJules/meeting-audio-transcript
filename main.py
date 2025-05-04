@@ -3,211 +3,188 @@ import os
 import tempfile
 from datetime import datetime
 import requests
+from transformers import pipeline
+from docx import Document
 import warnings
-import sys
-# Patch to avoid the PyTorch custom classes error...
-if 'torch.classes' in sys.modules:
-    del sys.modules['torch.classes']
 
 # Suppression des avertissements pour un affichage plus propre
 warnings.filterwarnings("ignore")
 
-# Import conditionnel pour éviter les erreurs au démarrage
-try:
-    from transformers import pipeline
-    import torch
-    WHISPER_AVAILABLE = True
-except ImportError:
-    WHISPER_AVAILABLE = False
-
-# Ajout pour markdowntodocx
-try:
-    from markdowntodocx import markdown_to_docx
-    MARKDOWN_TO_DOCX_AVAILABLE = True
-except ImportError:
-    MARKDOWN_TO_DOCX_AVAILABLE = False
-
 st.set_page_config(page_title="Outil de Transcription de Réunion", page_icon=":microphone:", layout="wide")
 
-def transcribe_audio(audio_file, file_extension, model_size="base"):
-    """Transcrit le fichier audio téléchargé en texte en utilisant le modèle Whisper de Hugging Face"""
-    
-    if not WHISPER_AVAILABLE:
-        st.error("Les bibliothèques nécessaires (transformers, torch) ne sont pas disponibles. Veuillez vérifier votre installation.")
-        return "Erreur: Dépendances manquantes pour la transcription audio"
-
-    # Correspondance entre la taille du modèle et l'ID du modèle Hugging Face
-    model_id_mapping = {
-        "tiny": "openai/whisper-tiny",
-        "base": "openai/whisper-base",
-        "small": "openai/whisper-small",
-        "medium": "openai/whisper-medium",
-        "large": "openai/whisper-large-v3",
-    }
-    model_id = model_id_mapping.get(model_size, "openai/whisper-base")
-    
-    # Création d'un fichier temporaire avec la bonne extension
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_audio:
-        temp_audio.write(audio_file.getvalue())
-        temp_audio_path = temp_audio.name
-    
+def transcribe_audio(audio_file, file_extension):
+    """Transcrit le fichier audio téléchargé en texte en utilisant le modèle Whisper"""
     try:
-        # Utilisation du GPU si disponible
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        
-        # Création du pipeline Whisper
-        pipe = pipeline("automatic-speech-recognition", model=model_id, device=device)
-        
-        # Transcription de l'audio avec chunking pour les audios longs
-        result = pipe(temp_audio_path, chunk_length_s=30, stride_length_s=5)
-        transcription = result["text"]
-        
-        return transcription
-    
+        transcriber = pipeline("automatic-speech-recognition", model="openai/whisper-base")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_audio:
+            temp_audio.write(audio_file.getvalue())
+            temp_audio_path = temp_audio.name
+        result = transcriber(temp_audio_path, chunk_length_s=30, stride_length_s=5)
+        os.unlink(temp_audio_path)
+        return result["text"]
     except Exception as e:
         st.error(f"Erreur lors de la transcription audio: {e}")
         return f"Erreur lors de la transcription audio: {e}"
-    
-    finally:
-        # Nettoyage du fichier temporaire
-        try:
-            os.unlink(temp_audio_path)
-        except:
-            pass
 
-def format_meeting_notes_with_llm(transcript, meeting_title, date, attendees, template, api_key, action_items=None):
-    """Formate la transcription en notes de réunion en utilisant l'API Deepseek"""
-
+def extract_info(transcription, meeting_title, date, attendees, api_key, action_items=None):
+    """Extrait les informations clés de la transcription en utilisant l'API Deepseek"""
     if action_items is None:
         action_items = []
-
-    # Préparation des points d'action sous forme de texte s'ils existent
+    
     action_items_text = ""
     if action_items:
         for idx, item in enumerate(action_items, 1):
             action_items_text += f"{idx}. {item}\n"
-    else: 
-        action_items_text = "Aucun point d'action n'a été enregistré pendant la réunion."
+    else:
+        action_items_text = "Aucun point d'action n'a été enregistré."
 
-    # L'invite pour le LLM
     prompt = f"""
-    Vous êtes un professionnel du formatage des notes de réunion. Formatez la transcription de réunion suivante selon le modèle fourni.
+    Vous êtes un expert en rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez et structurez les informations suivantes en sections claires :
+    - Présence : Liste des participants présents et absents.
+    - Ordre du jour : Points discutés pendant la réunion.
+    - Résolutions : Décisions prises, responsables assignés, et délais.
+    - Sanctions : Sanctions ou pénalités appliquées, si mentionnées.
+    - Informations financières : Soldes, montants, ou autres données financières.
     
-    Détails de la Réunion:
-    - Titre de la Réunion: {meeting_title}
-    - Date: {date}
-    - Participants: {attendees}
-    - Points d'Action:
+    Détails de la Réunion :
+    - Titre : {meeting_title}
+    - Date : {date}
+    - Participants : {attendees}
+    - Points d'action :
     {action_items_text}
-
-    Transcription de la Réunion: 
-    {transcript}
-
-    Modèle de Réunion:
-    {template}
-
-   Veuillez formater la transcription de la réunion selon ce modèle, en la rendant professionnelle et bien organisée.
-   Travaillez en français.
-"""
     
-    try: 
-        # Appel de l'API Deepseek
+    Transcription :
+    {transcription}
+    
+    Retournez les informations structurées en sections avec des en-têtes clairs, en français.
+    """
+    
+    try:
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}"
         }
-
         payload = {
             "model": "deepseek-chat",
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.1, 
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
             "max_tokens": 4000
-            
         }
-
         response = requests.post(
-            "https://api.deepseek.com/v1/chat/completions", 
-            headers=headers, 
+            "https://api.deepseek.com/v1/chat/completions",
+            headers=headers,
             json=payload
         )
-
         if response.status_code == 200:
-            result = response.json()
-            formatted_notes = result["choices"][0]["message"]["content"].strip()
-            return formatted_notes
-        else: 
-            st.error(f"Erreur lors du formatage des notes de réunion: {response.status_code}")
+            return response.json()["choices"][0]["message"]["content"].strip()
+        else:
+            st.error(f"Erreur lors de l'extraction des informations: {response.status_code}")
             return None
-    
     except Exception as e:
-        st.error(f"Erreur lors du formatage des notes: {e}")
-        return format_meeting_notes_fallback(transcript, meeting_title, date, attendees, template, action_items)
+        st.error(f"Erreur lors de l'extraction des informations: {e}")
+        return None
+
+def extract_info_fallback(transcription, meeting_title, date, attendees, action_items=None):
+    """Mode de secours pour structurer les informations si l'API Deepseek échoue"""
+    if action_items is None:
+        action_items = []
     
-
-def format_meeting_notes_fallback(transcript, meeting_title, date, attendees, template, action_items=None):
-    """Formateur de secours si l'appel LLM échoue"""
-
-    # Création d'un tableau pour la réunion
-    meeting_notes = f"""
-    | DATE | DOSSIERS | RÉSOLUTIONS | RESP. | DÉLAI D'EXÉCUTION | DATE D'EXÉCUTION | STATUT | NBR DE REPORT |
-    | ---- | -------- | ----------- | ----- | ----------------- | ---------------- | ------ | ------------- |
-    | {date} | {meeting_title} | | | | | En cours | 00 |
-    """
-
-    # Ajout des points d'action s'ils existent
-    meeting_notes += "\n\n## Points d'Action:\n"
+    action_items_text = ""
     if action_items:
-       for idx, item in enumerate(action_items, 1):
-           meeting_notes += f"{idx}. {item}\n"
-    else: 
-        meeting_notes += "Aucun point d'action n'a été enregistré pendant la réunion."
+        for idx, item in enumerate(action_items, 1):
+            action_items_text += f"{idx}. {item}\n"
+    else:
+        action_items_text = "Aucun point d'action n'a été enregistré."
     
-    # Ajout de la transcription
-    meeting_notes += f"\n\n## Transcription:\n{transcript}"
+    return f"""
+## Présence
+{attendees}
 
-    return meeting_notes
+## Ordre du jour
+Non spécifié dans la transcription.
 
+## Résolutions
+| DATE | DOSSIERS | RÉSOLUTIONS | RESP. | DÉLAI D'EXÉCUTION | DATE D'EXÉCUTION | STATUT | NBR DE REPORT |
+| ---- | -------- | ----------- | ----- | ----------------- | ---------------- | ------ | ------------- |
+| {date} | {meeting_title} | Non spécifié | Non spécifié | Non spécifié | Non spécifié | En cours | 00 |
+
+## Sanctions
+Aucune sanction mentionnée.
+
+## Informations financières
+Aucune information financière mentionnée.
+
+## Points d'action
+{action_items_text}
+
+## Transcription
+{transcription}
+"""
+
+def generate_word_document(extracted_info, meeting_title, date):
+    """Génère un document Word à partir des informations extraites"""
+    doc = Document()
+    doc.add_heading(f"Compte Rendu de Réunion - {meeting_title}", 0)
+    doc.add_paragraph(f"Date : {date}")
+    
+    sections = extracted_info.split("\n\n")
+    for section in sections:
+        lines = section.split("\n")
+        if lines and lines[0].startswith("## "):
+            heading = lines[0].replace("## ", "").strip()
+            doc.add_heading(heading, level=1)
+            content = "\n".join(lines[1:]).strip()
+            if heading == "Résolutions" and content.startswith("|"):
+                # Gérer le tableau des résolutions
+                table_data = [row.split("|")[1:-1] for row in content.split("\n") if row.startswith("|")]
+                table = doc.add_table(rows=len(table_data), cols=len(table_data[0]))
+                table.style = "Table Grid"
+                for i, row in enumerate(table_data):
+                    for j, cell in enumerate(row):
+                        table.cell(i, j).text = cell.strip()
+            else:
+                doc.add_paragraph(content)
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+        doc.save(tmp.name)
+        with open(tmp.name, "rb") as f:
+            docx_data = f.read()
+        os.unlink(tmp.name)
+    return docx_data
 
 def main():
     st.title("Outil de Transcription Audio de Réunion")
     
     # Vérification des dépendances
-    if not WHISPER_AVAILABLE:
+    try:
+        from transformers import pipeline
+        WHISPER_AVAILABLE = True
+    except ImportError:
+        WHISPER_AVAILABLE = False
         st.warning("""
-        ⚠️ Certaines dépendances requises ne sont pas disponibles (transformers, torch).
-        
-        Pour les installer, exécutez:
-        ```
-        pip install transformers torch
-        ```
-        
-        L'application fonctionnera en mode limité sans la fonctionnalité de transcription audio.
+        ⚠️ Les dépendances nécessaires (transformers, torch) ne sont pas installées.
+        Exécutez : `pip install transformers torch`
         """)
     
-    # Initialisation de l'état pour la clé API et le modèle
+    try:
+        from docx import Document
+        DOCX_AVAILABLE = True
+    except ImportError:
+        DOCX_AVAILABLE = False
+        st.warning("""
+        ⚠️ La bibliothèque python-docx n'est pas installée.
+        Exécutez : `pip install python-docx`
+        """)
+    
+    # Initialisation de l'état
     if 'api_key' not in st.session_state:
         st.session_state.api_key = ""
-    if 'template' not in st.session_state:
-        st.session_state.template = """
-| DATE | DOSSIERS | RÉSOLUTIONS | RESP. | DÉLAI D'EXÉCUTION | DATE D'EXÉCUTION | STATUT | NBR DE REPORT |
-| ---- | -------- | ----------- | ----- | ----------------- | ---------------- | ------ | ------------- |
-| [DATE] | [TITRE DE LA RÉUNION] | [POINTS CLÉS DISCUTÉS] | [RESPONSABLE] | [DÉLAI] | | En cours | 00 |
-
-## Points d'Action:
-[LISTE DES POINTS D'ACTION AVEC LES PERSONNES RESPONSABLES]
-
-## Prochaines Étapes:
-[ACTIONS DE SUIVI OU PROCHAINE RÉUNION]
-"""
     
-    # Barre latérale pour le téléchargement de fichiers et les options
+    # Barre latérale pour les options
     with st.sidebar:
         st.header("Télécharger un Fichier Audio")
         uploaded_file = st.file_uploader("Choisir un fichier audio", type=["wav", "mp3", "m4a", "flac"])
         
-        # Options du modèle
         st.header("Options de Transcription")
         whisper_model = st.selectbox(
             "Taille du Modèle Whisper",
@@ -216,290 +193,168 @@ def main():
             help="Les modèles plus grands sont plus précis mais plus lents"
         )
         
-        # Paramètres API
         st.header("Paramètres API Deepseek")
-        api_key = st.text_input("Clé API Deepseek", 
-                                value=st.session_state.api_key, 
-                                type="password",
-                                help="Entrez votre clé API Deepseek")
-        # Sauvegarde de la clé API dans l'état de session
+        api_key = st.text_input("Clé API Deepseek", value=st.session_state.api_key, type="password")
         st.session_state.api_key = api_key
         
         if uploaded_file is not None:
             file_extension = uploaded_file.name.split('.')[-1].lower()
             st.info(f"Fichier téléchargé: {uploaded_file.name}")
-            
-            # Ajout d'un bouton pour démarrer la transcription
             transcribe_button = st.button("Transcrire l'Audio")
     
-    # Zone de contenu principal avec deux colonnes
+    # Contenu principal
     if uploaded_file is not None:
         col1, col2 = st.columns(2)
         
         with col1:
             st.header("Détails de la Réunion")
-            meeting_title = st.text_input("Titre de la Réunion")
+            meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
             meeting_date = st.date_input("Date de la Réunion", datetime.now())
             attendees = st.text_area("Participants (séparés par des virgules)")
             
-            # Personnalisation du modèle
-            st.subheader("Modèle de Notes de Réunion")
-            template = st.text_area("Personnaliser le Modèle", 
-                                   value=st.session_state.template, 
-                                   height=250)
-            # Sauvegarde du modèle dans l'état de session
-            st.session_state.template = template
-            
-            # Conteneur pour les points d'action dynamiques
             st.subheader("Points d'Action")
             action_items_container = st.container()
-            
-            # Initialisation de l'état de session pour les points d'action si ce n'est pas déjà fait
             if 'action_items' not in st.session_state:
                 st.session_state.action_items = [""]
-                
-            # Affichage de tous les points d'action actuels
+            
             with action_items_container:
                 new_action_items = []
-                
                 for i, item in enumerate(st.session_state.action_items):
-                    # Pour chaque point d'action, création d'une ligne avec une entrée de texte et un bouton de suppression
                     cols = st.columns([0.9, 0.1])
                     with cols[0]:
                         new_item = st.text_input(f"Point {i+1}", item, key=f"item_{i}")
                     with cols[1]:
                         if st.button("𝗫", key=f"del_{i}"):
-                            pass  # Nous gérerons la suppression en n'ajoutant pas à la nouvelle liste
+                            pass
                         else:
                             new_action_items.append(new_item)
-                
-                # Mise à jour de l'état de session avec la liste filtrée (gère les suppressions)
                 st.session_state.action_items = new_action_items if new_action_items else [""]
-                
-            # Bouton pour ajouter un nouveau point d'action
+            
             if st.button("Ajouter un Point d'Action"):
                 st.session_state.action_items.append("")
-                st.rerun()  # Force le rafraîchissement pour afficher le nouveau champ
+                st.rerun()
         
         with col2:
             st.header("Transcription & Sortie")
             
-            if transcribe_button:
-                with st.spinner(f"Transcription audio avec le modèle Whisper {whisper_model} en cours..."):
-                    transcript = transcribe_audio(uploaded_file, file_extension, whisper_model)
+            if transcribe_button and WHISPER_AVAILABLE:
+                with st.spinner(f"Transcription audio avec le modèle Whisper {whisper_model}..."):
+                    transcription = transcribe_audio(uploaded_file, file_extension)
                 
-                if transcript:
+                if transcription and not transcription.startswith("Erreur"):
                     st.success("Transcription terminée!")
+                    st.session_state.transcription = transcription
                     
-                    # Stockage de la transcription dans l'état de session
-                    st.session_state.transcript = transcript
-                    
-                    # Affichage de la transcription
                     st.subheader("Transcription Brute")
-                    st.text_area("Modifier si nécessaire:", transcript, height=200, key="edited_transcript")
+                    st.text_area("Modifier si nécessaire:", transcription, height=200, key="edited_transcription")
                     
-                    # Bouton de formatage des notes
-                    if st.button("Formater les Notes de Réunion"):
-                        # Utilisation de la transcription modifiée
-                        edited_transcript = st.session_state.get("edited_transcript", transcript)
-                        
-                        # Filtrage des points d'action vides
+                    if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
+                        edited_transcription = st.session_state.get("edited_transcription", transcription)
                         action_items = [item for item in st.session_state.action_items if item.strip()]
                         
                         if st.session_state.api_key:
-                            with st.spinner("Formatage avec Deepseek LLM..."):
-                                # Formatage avec le LLM
-                                formatted_notes = format_meeting_notes_with_llm(
-                                    edited_transcript,
+                            with st.spinner("Extraction des informations avec Deepseek..."):
+                                extracted_info = extract_info(
+                                    edited_transcription,
                                     meeting_title,
                                     meeting_date.strftime("%d/%m/%Y"),
                                     attendees,
-                                    st.session_state.template,
                                     st.session_state.api_key,
                                     action_items
                                 )
                         else:
-                            st.warning("Aucune clé API Deepseek fournie. Utilisation du formateur de secours.")
-                            # Formatage avec le formateur de secours
-                            formatted_notes = format_meeting_notes_fallback(
-                                edited_transcript,
+                            st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
+                            extracted_info = extract_info_fallback(
+                                edited_transcription,
                                 meeting_title,
                                 meeting_date.strftime("%d/%m/%Y"),
                                 attendees,
-                                st.session_state.template,
                                 action_items
                             )
                         
-                        # Stockage des notes formatées dans l'état de session
-                        st.session_state.formatted_notes = formatted_notes
-                        
-                        # Affichage des notes formatées
-                        st.subheader("Notes de Réunion Formatées")
-                        st.text_area("Aperçu:", formatted_notes, height=300)
-                        
-                        # Téléchargement des notes
-                        if formatted_notes:
-                            if MARKDOWN_TO_DOCX_AVAILABLE:
-                                # Créer des fichiers temporaires pour Markdown et DOCX
-                                with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as tmp_md:
-                                    tmp_md.write(formatted_notes.encode())
-                                    tmp_md_path = tmp_md.name
-                                
-                                with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
-                                    tmp_docx_path = tmp_docx.name
-                                
-                                # Convertir Markdown en DOCX
-                                markdown_to_docx(tmp_md_path, tmp_docx_path)
-                                
-                                # Lire le fichier DOCX en mémoire
-                                with open(tmp_docx_path, "rb") as f:
-                                    docx_data = f.read()
-                                
-                                # Télécharger le fichier DOCX
-                                st.download_button(
-                                    label="Télécharger les Notes de Réunion",
-                                    data=docx_data,
-                                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        if extracted_info:
+                            st.session_state.extracted_info = extracted_info
+                            st.subheader("Informations Extraites")
+                            st.text_area("Aperçu:", extracted_info, height=300)
+                            
+                            with st.spinner("Génération du document Word..."):
+                                docx_data = generate_word_document(
+                                    extracted_info,
+                                    meeting_title,
+                                    meeting_date.strftime("%d/%m/%Y")
                                 )
-                                
-                                # Nettoyer les fichiers temporaires
-                                os.unlink(tmp_md_path)
-                                os.unlink(tmp_docx_path)
-                            else:
-                                st.warning("markdowntodocx n'est pas installé. Téléchargement au format Markdown.")
-                                st.download_button(
-                                    label="Télécharger les Notes de Réunion",
-                                    data=formatted_notes,
-                                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
-                                    mime="text/markdown"
-                                )
-            
-            # Si nous avons déjà transcrit, affichage des résultats
-            elif hasattr(st.session_state, 'transcript'):
-                # Affichage de la transcription
-                st.subheader("Transcription Brute")
-                st.text_area("Modifier si nécessaire:", st.session_state.transcript, height=200, key="edited_transcript")
-                
-                # Bouton de formatage des notes
-                if st.button("Formater les Notes de Réunion"):
-                    # Utilisation de la transcription modifiée
-                    edited_transcript = st.session_state.get("edited_transcript", st.session_state.transcript)
-                    
-                    # Filtrage des points d'action vides
-                    action_items = [item for item in st.session_state.action_items if item.strip()]
-                    
-                    if st.session_state.api_key:
-                        with st.spinner("Formatage avec Deepseek LLM..."):
-                            # Formatage avec le LLM
-                            formatted_notes = format_meeting_notes_with_llm(
-                                edited_transcript,
-                                meeting_title,
-                                meeting_date.strftime("%d/%m/%Y"),
-                                attendees,
-                                st.session_state.template,
-                                st.session_state.api_key,
-                                action_items
-                            )
-                    else:
-                        st.warning("Aucune clé API Deepseek fournie. Utilisation du formateur de secours.")
-                        # Formatage avec le formateur de secours
-                        formatted_notes = format_meeting_notes_fallback(
-                            edited_transcript,
-                            meeting_title,
-                            meeting_date.strftime("%d/%m/%Y"),
-                            attendees,
-                            st.session_state.template,
-                            action_items
-                        )
-                    
-                    # Stockage des notes formatées dans l'état de session
-                    st.session_state.formatted_notes = formatted_notes
-                    
-                    # Affichage des notes formatées
-                    st.subheader("Notes de Réunion Formatées")
-                    st.text_area("Aperçu:", formatted_notes, height=300)
-                    
-                    # Téléchargement des notes
-                    if formatted_notes:
-                        if MARKDOWN_TO_DOCX_AVAILABLE:
-                            # Créer des fichiers temporaires pour Markdown et DOCX
-                            with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as tmp_md:
-                                tmp_md.write(formatted_notes.encode())
-                                tmp_md_path = tmp_md.name
                             
-                            with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
-                                tmp_docx_path = tmp_docx.name
-                            
-                            # Convertir Markdown en DOCX
-                            markdown_to_docx(tmp_md_path, tmp_docx_path)
-                            
-                            # Lire le fichier DOCX en mémoire
-                            with open(tmp_docx_path, "rb") as f:
-                                docx_data = f.read()
-                            
-                            # Télécharger le fichier DOCX
                             st.download_button(
                                 label="Télécharger les Notes de Réunion",
                                 data=docx_data,
                                 file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
                                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                             )
-                            
-                            # Nettoyer les fichiers temporaires
-                            os.unlink(tmp_md_path)
-                            os.unlink(tmp_docx_path)
-                        else:
-                            st.warning("markdowntodocx n'est pas installé. Téléchargement au format Markdown.")
-                            st.download_button(
-                                label="Télécharger les Notes de Réunion",
-                                data=formatted_notes,
-                                file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
-                                mime="text/markdown"
-                            )
             
-            # Si nous avons déjà des notes formatées, les afficher
-            elif hasattr(st.session_state, 'formatted_notes'):
-                st.subheader("Notes de Réunion Formatées")
-                st.text_area("Aperçu:", st.session_state.formatted_notes, height=300)
+            elif hasattr(st.session_state, 'transcription') and WHISPER_AVAILABLE:
+                st.subheader("Transcription Brute")
+                st.text_area("Modifier si nécessaire:", st.session_state.transcription, height=200, key="edited_transcription")
                 
-                # Téléchargement des notes
-                formatted_notes = st.session_state.formatted_notes
-                if MARKDOWN_TO_DOCX_AVAILABLE:
-                    # Créer des fichiers temporaires pour Markdown et DOCX
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as tmp_md:
-                        tmp_md.write(formatted_notes.encode())
-                        tmp_md_path = tmp_md.name
+                if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
+                    edited_transcription = st.session_state.get("edited_transcription", st.session_state.transcription)
+                    action_items = [item for item in st.session_state.action_items if item.strip()]
                     
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
-                        tmp_docx_path = tmp_docx.name
+                    if st.session_state.api_key:
+                        with st.spinner("Extraction des informations avec Deepseek..."):
+                            extracted_info = extract_info(
+                                edited_transcription,
+                                meeting_title,
+                                meeting_date.strftime("%d/%m/%Y"),
+                                attendees,
+                                st.session_state.api_key,
+                                action_items
+                            )
+                    else:
+                        st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
+                        extracted_info = extract_info_fallback(
+                            edited_transcription,
+                            meeting_title,
+                            meeting_date.strftime("%d/%m/%Y"),
+                            attendees,
+                            action_items
+                        )
                     
-                    # Convertir Markdown en DOCX
-                    markdown_to_docx(tmp_md_path, tmp_docx_path)
-                    
-                    # Lire le fichier DOCX en mémoire
-                    with open(tmp_docx_path, "rb") as f:
-                        docx_data = f.read()
-                    
-                    # Télécharger le fichier DOCX
-                    st.download_button(
-                        label="Télécharger les Notes de Réunion",
-                        data=docx_data,
-                        file_name=f"notes_reunion_{datetime.now().strftime('%Y-%m-%d')}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    if extracted_info:
+                        st.session_state.extracted_info = extracted_info
+                        st.subheader("Informations Extraites")
+                        st.text_area("Aperçu:", extracted_info, height=300)
+                        
+                        with st.spinner("Génération du document Word..."):
+                            docx_data = generate_word_document(
+                                extracted_info,
+                                meeting_title,
+                                meeting_date.strftime("%d/%m/%Y")
+                            )
+                        
+                        st.download_button(
+                            label="Télécharger les Notes de Réunion",
+                            data=docx_data,
+                            file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+            
+            elif hasattr(st.session_state, 'extracted_info') and DOCX_AVAILABLE:
+                st.subheader("Informations Extraites")
+                st.text_area("Aperçu:", st.session_state.extracted_info, height=300)
+                
+                with st.spinner("Génération du document Word..."):
+                    docx_data = generate_word_document(
+                        st.session_state.extracted_info,
+                        meeting_title,
+                        meeting_date.strftime("%d/%m/%Y")
                     )
-                    
-                    # Nettoyer les fichiers temporaires
-                    os.unlink(tmp_md_path)
-                    os.unlink(tmp_docx_path)
-                else:
-                    st.warning("markdowntodocx n'est pas installé. Téléchargement au format Markdown.")
-                    st.download_button(
-                        label="Télécharger les Notes de Réunion",
-                        data=formatted_notes,
-                        file_name=f"notes_reunion_{datetime.now().strftime('%Y-%m-%d')}.md",
-                        mime="text/markdown"
-                    )
+                
+                st.download_button(
+                    label="Télécharger les Notes de Réunion",
+                    data=docx_data,
+                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
 
 if __name__ == "__main__":
     try:
@@ -508,86 +363,66 @@ if __name__ == "__main__":
         st.error(f"Une erreur s'est produite lors du démarrage de l'application: {e}")
         st.write("""
         ### Dépannage
-        
-        Si vous rencontrez des erreurs liées à PyTorchInsn1
-        PyTorch ou aux bibliothèques audio, essayez les solutions suivantes:
-        
-        1. Vérifiez que toutes les dépendances sont installées:
+        Si vous rencontrez des erreurs, essayez les solutions suivantes :
+        1. Installez toutes les dépendances :
            ```
-           pip install streamlit transformers torch==2.0.1 markdowntodocx
+           pip install streamlit transformers torch python-docx requests
            ```
-           
-        2. Si vous êtes sur Streamlit Cloud, assurez-vous d'avoir un fichier `requirements.txt` avec les bonnes versions:
+        2. Pour Streamlit Cloud, assurez-vous d'avoir un fichier `requirements.txt` :
            ```
            streamlit>=1.24.0
            transformers>=4.30.0
-           torch==2.0.1
-           markdowntodocx
+           torch>=2.0.1
+           python-docx>=0.8.11
            requests>=2.28.0
            ```
+        3. Installez ffmpeg pour les fichiers .m4a :
+           - Sur Ubuntu : `sudo apt-get install ffmpeg`
+           - Sur macOS : `brew install ffmpeg`
+           - Sur Windows : Téléchargez depuis https://ffmpeg.org/download.html
         """)
         
-        # Affichage d'une version minimale de l'interface sans fonctionnalités de transcription audio
-        st.title("Outil de Transcription Audio de Réunion (Mode Secours)")
-        st.warning("Application en mode limité suite à une erreur. La transcription audio n'est pas disponible.")
-        
-        # Interface simplifiée pour la saisie des informations de réunion
+        st.title("Mode Secours")
+        st.warning("Application en mode limité. La transcription audio n'est pas disponible.")
         st.header("Détails de la Réunion")
-        meeting_title = st.text_input("Titre de la Réunion")
+        meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
         meeting_date = st.date_input("Date de la Réunion", datetime.now())
         attendees = st.text_area("Participants (séparés par des virgules)")
-        transcript = st.text_area("Transcription (saisie manuelle)", height=300)
+        transcription = st.text_area("Transcription (saisie manuelle)", height=300)
         
-        # Bouton pour formater les notes
         if st.button("Formater les Notes de Réunion"):
-            # Format simple pour les notes
-            notes = f"""
-| DATE | DOSSIERS | RÉSOLUTIONS | RESP. | DÉLAI D'EXÉCUTION | DATE D'EXÉCUTION | STATUT | NBR DE REPORT |
-| ---- | -------- | ----------- | ----- | ----------------- | ---------------- | ------ | ------------- |
-| {meeting_date.strftime("%d/%m/%Y")} | {meeting_title} | | | | | En cours | 00 |
-
-## Participants:
+            extracted_info = f"""
+## Présence
 {attendees}
 
-## Transcription:
-{transcript}
+## Ordre du jour
+Non spécifié.
+
+## Résolutions
+| DATE | DOSSIERS | RÉSOLUTIONS | RESP. | DÉLAI D'EXÉCUTION | DATE D'EXÉCUTION | STATUT | NBR DE REPORT |
+| ---- | -------- | ----------- | ----- | ----------------- | ---------------- | ------ | ------------- |
+| {meeting_date.strftime("%d/%m/%Y")} | {meeting_title} | Non spécifié | Non spécifié | Non spécifié | Non spécifié | En cours | 00 |
+
+## Sanctions
+Aucune sanction mentionnée.
+
+## Informations financières
+Aucune information financière mentionnée.
+
+## Transcription
+{transcription}
 """
-            st.subheader("Notes de Réunion Formatées")
-            st.text_area("Aperçu:", notes, height=300)
+            st.subheader("Informations Extraites")
+            st.text_area("Aperçu:", extracted_info, height=300)
             
-            # Téléchargement des notes
-            if MARKDOWN_TO_DOCX_AVAILABLE:
-                # Créer des fichiers temporaires pour Markdown et DOCX
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as tmp_md:
-                    tmp_md.write(notes.encode())
-                    tmp_md_path = tmp_md.name
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
-                    tmp_docx_path = tmp_docx.name
-                
-                # Convertir Markdown en DOCX
-                markdown_to_docx(tmp_md_path, tmp_docx_path)
-                
-                # Lire le fichier DOCX en mémoire
-                with open(tmp_docx_path, "rb") as f:
-                    docx_data = f.read()
-                
-                # Télécharger le fichier DOCX
+            try:
+                from docx import Document
+                docx_data = generate_word_document(extracted_info, meeting_title, meeting_date.strftime("%d/%m/%Y"))
                 st.download_button(
                     label="Télécharger les Notes de Réunion",
                     data=docx_data,
                     file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-                
-                # Nettoyer les fichiers temporaires
-                os.unlink(tmp_md_path)
-                os.unlink(tmp_docx_path)
-            else:
-                st.warning("markdowntodocx n'est pas installé. Téléchargement au format Markdown.")
-                st.download_button(
-                    label="Télécharger les Notes de Réunion",
-                    data=notes,
-                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.md",
-                    mime="text/markdown"
-                )
+            except ImportError:
+                st.warning("python-docx n'est pas installé. Téléchargement impossible.")
