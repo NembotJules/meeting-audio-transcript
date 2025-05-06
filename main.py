@@ -6,8 +6,6 @@ import requests
 from transformers import pipeline
 from docxtpl import DocxTemplate
 from docx import Document
-from docx.oxml.ns import qn
-from docx.oxml import OxmlElement
 import warnings
 import torch
 import torchaudio
@@ -22,7 +20,7 @@ st.set_page_config(page_title="Outil de Transcription de Réunion", page_icon=":
 TEMPLATE_PATH = "Template_reunion.docx"
 
 def transcribe_audio(audio_file, file_extension, model_size="base"):
-    """Transcrit le fichier audio téléchargé en texte en utilisant le modèle Whisper"""
+    """Transcribe the uploaded audio file to text using the Whisper model"""
     try:
         model_id_mapping = {
             "tiny": "openai/whisper-tiny",
@@ -53,7 +51,7 @@ def transcribe_audio(audio_file, file_extension, model_size="base"):
         return f"Erreur lors de la transcription audio: {e}"
 
 def extract_info(transcription, meeting_title, date, attendees, api_key, action_items=None):
-    """Extrait les informations clés de la transcription en utilisant l'API Deepseek"""
+    """Extract key information from the transcription using Deepseek API"""
     if action_items is None:
         action_items = []
     
@@ -107,21 +105,22 @@ def extract_info(transcription, meeting_title, date, attendees, api_key, action_
             json=payload
         )
         if response.status_code == 200:
-            response_text = response.json()["choices"][0]["message"]["content"].strip()
+            raw_response = response.json()["choices"][0]["message"]["content"].strip()
+            st.write(f"Réponse brute de Deepseek : {raw_response}")
             try:
-                return json.loads(response_text)
+                return json.loads(raw_response)
             except json.JSONDecodeError as e:
-                st.error(f"Erreur lors du parsing de la réponse Deepseek en JSON: {e}. Utilisation du mode de secours.")
+                st.error(f"Erreur lors du parsing JSON : {e}")
                 return None
         else:
-            st.error(f"Erreur lors de l'extraction des informations: {response.status_code}")
+            st.error(f"Erreur API Deepseek : Statut {response.status_code}, Message : {response.text}")
             return None
     except Exception as e:
-        st.error(f"Erreur lors de l'extraction des informations: {e}")
+        st.error(f"Erreur lors de l'extraction des informations : {e}")
         return None
 
 def extract_info_fallback(transcription, meeting_title, date, attendees, action_items=None):
-    """Mode de secours pour structurer les informations si l'API Deepseek échoue"""
+    """Fallback mode for structuring information if Deepseek API fails"""
     if action_items is None:
         action_items = []
     
@@ -166,47 +165,39 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, action_
     }
 
 def fill_template_and_generate_docx(extracted_info, template_path):
-    """Remplit le modèle Word et génère un document téléchargeable"""
+    """Fill the Word template and generate a downloadable document"""
     try:
-        # Vérifier si le modèle existe
         if not os.path.exists(template_path):
             raise FileNotFoundError(f"Le fichier modèle {template_path} n'est pas trouvé.")
         
-        # Charger le modèle avec docxtpl
         doc = DocxTemplate(template_path)
         
-        # Préparer les données pour le modèle
         context = {
             "date": extracted_info["date"],
             "start_time": extracted_info["start_time"],
             "end_time": extracted_info["end_time"],
             "presence_list": extracted_info["presence_list"],
             "agenda_items": extracted_info["agenda_items"],
-            # Les tableaux seront traités après, donc on passe des chaînes vides ici
             "resolutions_summary": "",
             "sanctions_summary": "",
             "balance_amount": extracted_info["balance_amount"],
             "balance_date": extracted_info["balance_date"]
         }
         
-        # Remplir les placeholders simples
+        st.write("Contexte pour le rendu du modèle :", context)
         doc.render(context)
         
-        # Sauvegarder temporairement le document rempli
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             doc.save(tmp.name)
             tmp_path = tmp.name
         
-        # Charger le document avec python-docx pour ajouter les tableaux
         docx_doc = Document(tmp_path)
         
-        # Trouver les paragraphes correspondant aux sections "RÉCAPITULATIF DES RÉSOLUTIONS" et "RÉCAPITULATIF DES SANCTIONS"
         resolutions_found = False
         sanctions_found = False
         for i, para in enumerate(docx_doc.paragraphs):
             if "RÉCAPITULATIF DES RÉSOLUTIONS" in para.text:
                 resolutions_found = True
-                # Ajouter le tableau des résolutions
                 resolutions = extracted_info.get("resolutions_summary", [])
                 if not resolutions:
                     resolutions = [{
@@ -221,11 +212,9 @@ def fill_template_and_generate_docx(extracted_info, template_path):
                     }]
                 table = docx_doc.add_table(rows=len(resolutions) + 1, cols=8)
                 table.style = "Table Grid"
-                # En-têtes du tableau
                 headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
                 for j, header in enumerate(headers):
                     table.cell(0, j).text = header
-                # Remplir les données
                 for row_idx, resolution in enumerate(resolutions, 1):
                     table.cell(row_idx, 0).text = resolution.get("date", "Non spécifié")
                     table.cell(row_idx, 1).text = resolution.get("dossier", "Non spécifié")
@@ -235,13 +224,11 @@ def fill_template_and_generate_docx(extracted_info, template_path):
                     table.cell(row_idx, 5).text = resolution.get("execution_date", "")
                     table.cell(row_idx, 6).text = resolution.get("status", "En cours")
                     table.cell(row_idx, 7).text = resolution.get("report_count", "00")
-                # Déplacer le tableau après le paragraphe
                 para._element.addnext(table._element)
                 para.text = para.text.replace("{{resolutions_summary}}", "")
             
             if "RÉCAPITULATIF DES SANCTIONS" in para.text:
                 sanctions_found = True
-                # Ajouter le tableau des sanctions
                 sanctions = extracted_info.get("sanctions_summary", [])
                 if not sanctions:
                     sanctions = [{
@@ -253,22 +240,18 @@ def fill_template_and_generate_docx(extracted_info, template_path):
                     }]
                 table = docx_doc.add_table(rows=len(sanctions) + 1, cols=5)
                 table.style = "Table Grid"
-                # En-têtes du tableau
                 headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
                 for j, header in enumerate(headers):
                     table.cell(0, j).text = header
-                # Remplir les données
                 for row_idx, sanction in enumerate(sanctions, 1):
                     table.cell(row_idx, 0).text = sanction.get("name", "Aucun")
                     table.cell(row_idx, 1).text = sanction.get("reason", "Aucune sanction mentionnée")
                     table.cell(row_idx, 2).text = sanction.get("amount", "0")
                     table.cell(row_idx, 3).text = sanction.get("date", extracted_info["date"])
                     table.cell(row_idx, 4).text = sanction.get("status", "Non appliqué")
-                # Déplacer le tableau après le paragraphe
                 para._element.addnext(table._element)
                 para.text = para.text.replace("{{sanctions_summary}}", "")
         
-        # Si les sections n'ont pas été trouvées, ajouter les tableaux à la fin
         if not resolutions_found:
             docx_doc.add_heading("RÉCAPITULATIF DES RÉSOLUTIONS", level=1)
             resolutions = extracted_info.get("resolutions_summary", [])
@@ -321,23 +304,22 @@ def fill_template_and_generate_docx(extracted_info, template_path):
                 table.cell(row_idx, 3).text = sanction.get("date", extracted_info["date"])
                 table.cell(row_idx, 4).text = sanction.get("status", "Non appliqué")
         
-        # Sauvegarder le document final
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as final_tmp:
             docx_doc.save(final_tmp.name)
             with open(final_tmp.name, "rb") as f:
                 docx_data = f.read()
             os.unlink(final_tmp.name)
         
-        # Nettoyer le fichier temporaire initial
         os.unlink(tmp_path)
         
         return docx_data
     
     except Exception as e:
-        st.error(f"Erreur lors de la génération du document Word: {e}")
+        st.error(f"Erreur lors de la génération du document Word : {e}")
         st.write("""
-        Assurez-vous que :
-        - Le fichier Template_reunion.docx utilise la syntaxe {{placeholder}} pour les placeholders (par exemple, {{date}} au lieu de [Date]).
+        Vérifiez que :
+        - Le fichier Template_reunion.docx utilise la syntaxe {{placeholder}} (par exemple, {{date}}).
+        - Tous les placeholders sont correctement fermés (par exemple, pas de {{date sans }}).
         - Le fichier n'est pas ouvert dans une autre application.
         - Vous avez les permissions nécessaires pour écrire des fichiers temporaires.
         """)
@@ -346,7 +328,6 @@ def fill_template_and_generate_docx(extracted_info, template_path):
 def main():
     st.title("Outil de Transcription Audio de Réunion")
     
-    # Vérification des dépendances
     try:
         from transformers import pipeline
         WHISPER_AVAILABLE = True
@@ -369,25 +350,31 @@ def main():
         Exécutez : `pip install docxtpl python-docx`
         """)
     
-    # Vérifier si le modèle existe
     if not os.path.exists(TEMPLATE_PATH):
         st.error(f"Le modèle Word {TEMPLATE_PATH} n'est pas trouvé. Veuillez placer le fichier dans le même répertoire que le script.")
+        st.stop()
     
-    # Initialisation de l'état
     if 'api_key' not in st.session_state:
         st.session_state.api_key = ""
     
-    # Barre latérale pour les options
     with st.sidebar:
-        st.header("Télécharger un Fichier Audio")
-        uploaded_file = st.file_uploader("Choisir un fichier audio", type=["wav", "mp3", "m4a", "flac"])
+        st.header("Source de la Transcription")
+        input_method = st.radio("Choisissez une méthode :", ("Télécharger un fichier audio", "Entrer une transcription manuelle"))
         
-        st.header("Options de Transcription")
+        if input_method == "Télécharger un fichier audio":
+            uploaded_file = st.file_uploader("Choisir un fichier audio", type=["wav", "mp3", "m4a", "flac"])
+            manual_transcript = None
+        else:
+            uploaded_file = None
+            manual_transcript = st.text_area("Collez votre transcription ici :", height=200, key="manual_transcript_input")
+        
+        st.header("Options de Transcription (si fichier audio)")
         whisper_model = st.selectbox(
             "Taille du Modèle Whisper",
             ["tiny", "base", "small", "medium", "large"],
             index=1,
-            help="Les modèles plus grands sont plus précis mais plus lents"
+            help="Les modèles plus grands sont plus précis mais plus lents",
+            disabled=(input_method == "Entrer une transcription manuelle")
         )
         
         st.header("Paramètres API Deepseek")
@@ -398,77 +385,84 @@ def main():
             file_extension = uploaded_file.name.split('.')[-1].lower()
             st.info(f"Fichier téléchargé: {uploaded_file.name}")
             transcribe_button = st.button("Transcrire l'Audio")
+        elif manual_transcript:
+            transcribe_button = False
+            st.info("Transcription manuelle détectée. Passez directement au formatage.")
+        else:
+            transcribe_button = False
     
-    # Contenu principal
-    if uploaded_file is not None:
-        col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.header("Détails de la Réunion")
+        meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
+        meeting_date = st.date_input("Date de la Réunion", datetime.now())
+        attendees = st.text_area("Participants (séparés par des virgules)")
         
-        with col1:
-            st.header("Détails de la Réunion")
-            meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
-            meeting_date = st.date_input("Date de la Réunion", datetime.now())
-            attendees = st.text_area("Participants (séparés par des virgules)")
-            
-            st.subheader("Points d'Action")
-            action_items_container = st.container()
-            if 'action_items' not in st.session_state:
-                st.session_state.action_items = [""]
-            
-            with action_items_container:
-                new_action_items = []
-                for i, item in enumerate(st.session_state.action_items):
-                    cols = st.columns([0.9, 0.1])
-                    with cols[0]:
-                        new_item = st.text_input(f"Point {i+1}", item, key=f"item_{i}")
-                    with cols[1]:
-                        if st.button("𝗫", key=f"del_{i}"):
-                            pass
-                        else:
-                            new_action_items.append(new_item)
-                st.session_state.action_items = new_action_items if new_action_items else [""]
-            
-            if st.button("Ajouter un Point d'Action"):
-                st.session_state.action_items.append("")
-                st.rerun()
+        st.subheader("Points d'Action")
+        action_items_container = st.container()
+        if 'action_items' not in st.session_state:
+            st.session_state.action_items = [""]
         
-        with col2:
-            st.header("Transcription & Sortie")
+        with action_items_container:
+            new_action_items = []
+            for i, item in enumerate(st.session_state.action_items):
+                cols = st.columns([0.9, 0.1])
+                with cols[0]:
+                    new_item = st.text_input(f"Point {i+1}", item, key=f"item_{i}")
+                with cols[1]:
+                    if st.button("𝗫", key=f"del_{i}"):
+                        pass
+                    else:
+                        new_action_items.append(new_item)
+            st.session_state.action_items = new_action_items if new_action_items else [""]
+        
+        if st.button("Ajouter un Point d'Action"):
+            st.session_state.action_items.append("")
+            st.rerun()
+    
+    with col2:
+        st.header("Transcription & Sortie")
+        
+        # Handle the transcription source
+        if transcribe_button and WHISPER_AVAILABLE and uploaded_file is not None:
+            with st.spinner(f"Transcription audio avec le modèle Whisper {whisper_model}..."):
+                transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
             
-            if transcribe_button and WHISPER_AVAILABLE:
-                with st.spinner(f"Transcription audio avec le modèle Whisper {whisper_model}..."):
-                    transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
+            if transcription and not transcription.startswith("Erreur"):
+                st.success("Transcription terminée!")
+                st.session_state.transcription = transcription
+        elif manual_transcript:
+            transcription = manual_transcript.strip()
+            if transcription:
+                st.success("Transcription manuelle chargée!")
+                st.session_state.transcription = transcription
+            else:
+                st.error("Veuillez entrer une transcription valide.")
+                transcription = None
+        else:
+            transcription = getattr(st.session_state, 'transcription', None)
+        
+        # Display and process the transcription
+        if transcription:
+            st.subheader("Transcription")
+            st.text_area("Modifier si nécessaire:", transcription, height=200, key="edited_transcription")
+            
+            if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
+                edited_transcription = st.session_state.get("edited_transcription", transcription)
+                action_items = [item for item in st.session_state.action_items if item.strip()]
                 
-                if transcription and not transcription.startswith("Erreur"):
-                    st.success("Transcription terminée!")
-                    st.session_state.transcription = transcription
-                    
-                    st.subheader("Transcription Brute")
-                    st.text_area("Modifier si nécessaire:", transcription, height=200, key="edited_transcription")
-                    
-                    if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
-                        edited_transcription = st.session_state.get("edited_transcription", transcription)
-                        action_items = [item for item in st.session_state.action_items if item.strip()]
-                        
-                        if st.session_state.api_key:
-                            with st.spinner("Extraction des informations avec Deepseek..."):
-                                extracted_info = extract_info(
-                                    edited_transcription,
-                                    meeting_title,
-                                    meeting_date.strftime("%d/%m/%Y"),
-                                    attendees,
-                                    st.session_state.api_key,
-                                    action_items
-                                )
-                                if not extracted_info:
-                                    extracted_info = extract_info_fallback(
-                                        edited_transcription,
-                                        meeting_title,
-                                        meeting_date.strftime("%d/%m/%Y"),
-                                        attendees,
-                                        action_items
-                                    )
-                        else:
-                            st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
+                if st.session_state.api_key:
+                    with st.spinner("Extraction des informations avec Deepseek..."):
+                        extracted_info = extract_info(
+                            edited_transcription,
+                            meeting_title,
+                            meeting_date.strftime("%d/%m/%Y"),
+                            attendees,
+                            st.session_state.api_key,
+                            action_items
+                        )
+                        if not extracted_info:
                             extracted_info = extract_info_fallback(
                                 edited_transcription,
                                 meeting_title,
@@ -476,89 +470,46 @@ def main():
                                 attendees,
                                 action_items
                             )
-                        
-                        if extracted_info:
-                            st.session_state.extracted_info = extracted_info
-                            st.subheader("Informations Extraites")
-                            st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
-                            
-                            with st.spinner("Génération du document Word..."):
-                                docx_data = fill_template_and_generate_docx(extracted_info, TEMPLATE_PATH)
-                            
-                            if docx_data:
-                                st.download_button(
-                                    label="Télécharger les Notes de Réunion",
-                                    data=docx_data,
-                                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                                )
-            
-            elif hasattr(st.session_state, 'transcription') and WHISPER_AVAILABLE:
-                st.subheader("Transcription Brute")
-                st.text_area("Modifier si nécessaire:", st.session_state.transcription, height=200, key="edited_transcription")
-                
-                if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
-                    edited_transcription = st.session_state.get("edited_transcription", st.session_state.transcription)
-                    action_items = [item for item in st.session_state.action_items if item.strip()]
-                    
-                    if st.session_state.api_key:
-                        with st.spinner("Extraction des informations avec Deepseek..."):
-                            extracted_info = extract_info(
-                                edited_transcription,
-                                meeting_title,
-                                meeting_date.strftime("%d/%m/%Y"),
-                                attendees,
-                                st.session_state.api_key,
-                                action_items
-                            )
-                            if not extracted_info:
-                                extracted_info = extract_info_fallback(
-                                    edited_transcription,
-                                    meeting_title,
-                                    meeting_date.strftime("%d/%m/%Y"),
-                                    attendees,
-                                    action_items
-                                )
-                    else:
-                        st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
-                        extracted_info = extract_info_fallback(
-                            edited_transcription,
-                            meeting_title,
-                            meeting_date.strftime("%d/%m/%Y"),
-                            attendees,
-                            action_items
-                        )
-                    
-                    if extracted_info:
-                        st.session_state.extracted_info = extracted_info
-                        st.subheader("Informations Extraites")
-                        st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
-                        
-                        with st.spinner("Génération du document Word..."):
-                            docx_data = fill_template_and_generate_docx(extracted_info, TEMPLATE_PATH)
-                        
-                        if docx_data:
-                            st.download_button(
-                                label="Télécharger les Notes de Réunion",
-                                data=docx_data,
-                                file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
-            
-            elif hasattr(st.session_state, 'extracted_info') and DOCX_AVAILABLE:
-                st.subheader("Informations Extraites")
-                st.text_area("Aperçu:", json.dumps(st.session_state.extracted_info, indent=2, ensure_ascii=False), height=300)
-                
-                with st.spinner("Génération du document Word..."):
-                    docx_data = fill_template_and_generate_docx(st.session_state.extracted_info, TEMPLATE_PATH)
-                
-                if docx_data:
-                    st.download_button(
-                        label="Télécharger les Notes de Réunion",
-                        data=docx_data,
-                        file_name=f"{meeting_title}_{datetime.now().strftime('%Y-%m-%d')}_notes.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                else:
+                    st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
+                    extracted_info = extract_info_fallback(
+                        edited_transcription,
+                        meeting_title,
+                        meeting_date.strftime("%d/%m/%Y"),
+                        attendees,
+                        action_items
                     )
+                
+                if extracted_info:
+                    st.session_state.extracted_info = extracted_info
+                    st.subheader("Informations Extraites")
+                    st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
+                    
+                    with st.spinner("Génération du document Word..."):
+                        docx_data = fill_template_and_generate_docx(extracted_info, TEMPLATE_PATH)
+                    
+                    if docx_data:
+                        st.download_button(
+                            label="Télécharger les Notes de Réunion",
+                            data=docx_data,
+                            file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+        
+        elif hasattr(st.session_state, 'extracted_info') and DOCX_AVAILABLE:
+            st.subheader("Informations Extraites")
+            st.text_area("Aperçu:", json.dumps(st.session_state.extracted_info, indent=2, ensure_ascii=False), height=300)
+            
+            with st.spinner("Génération du document Word..."):
+                docx_data = fill_template_and_generate_docx(st.session_state.extracted_info, TEMPLATE_PATH)
+            
+            if docx_data:
+                st.download_button(
+                    label="Télécharger les Notes de Réunion",
+                    data=docx_data,
+                    file_name=f"{meeting_title}_{datetime.now().strftime('%Y-%m-%d')}_notes.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
 
 if __name__ == "__main__":
     try:
