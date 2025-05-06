@@ -5,6 +5,8 @@ from datetime import datetime
 import requests
 from transformers import pipeline
 from docx import Document
+from docx.oxml.ns import qn
+from docx.shared import RGBColor, Pt
 import warnings
 import torch
 import torchaudio
@@ -115,10 +117,12 @@ def extract_info(transcription, meeting_title, date, attendees, api_key, action_
         st.error(f"Erreur lors de l'extraction des informations : {e}")
         return None
 
-def extract_info_fallback(transcription, meeting_title, date, attendees, action_items=None):
+def extract_info_fallback(transcription, meeting_title, date, attendees, action_items=None, start_time="Non spécifié", end_time="Non spécifié", agenda_items=None):
     """Fallback mode for structuring information if Deepseek API fails"""
     if action_items is None:
         action_items = []
+    if agenda_items is None:
+        agenda_items = ["Non spécifié dans la transcription."]
     
     action_items_text = ""
     if action_items:
@@ -127,12 +131,14 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, action_
     else:
         action_items_text = "Aucun point d'action n'a été enregistré."
     
+    agenda_text = "\n".join([f"{idx}. {item}" for idx, item in enumerate(agenda_items, 1)])
+    
     return {
         "date": date,
-        "start_time": "Non spécifié",
-        "end_time": "Non spécifié",
+        "start_time": start_time,
+        "end_time": end_time,
         "presence_list": attendees if attendees else "Non spécifié",
-        "agenda_items": "Non spécifié dans la transcription.",
+        "agenda_items": agenda_text,
         "resolutions_summary": [
             {
                 "date": date,
@@ -161,16 +167,20 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, action_
     }
 
 def generate_docx(extracted_info):
-    """Generate a Word document from scratch using the extracted information"""
+    """Generate a Word document from scratch using the extracted information with black and red theme"""
     try:
         # Create a new Word document
         doc = Document()
         
         # Add heading: Direction Recherches et Investissements
-        doc.add_heading("Direction Recherches et Investissements", level=1)
+        heading1 = doc.add_heading("Direction Recherches et Investissements", level=1)
+        for run in heading1.runs:
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
         
         # Add subheading: COMPTE RENDU RÉUNION HEBDOMADAIRE
-        doc.add_heading("COMPTE RENDU RÉUNION HEBDOMADAIRE", level=2)
+        heading2 = doc.add_heading("COMPTE RENDU RÉUNION HEBDOMADAIRE", level=2)
+        for run in heading2.runs:
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
         
         # Add date
         doc.add_paragraph(extracted_info["date"])
@@ -181,22 +191,53 @@ def generate_docx(extracted_info):
         # Add end time
         doc.add_paragraph(f"Heure de fin : {extracted_info['end_time']}")
         
-        # Add presence/absence list
-        doc.add_heading("LISTE DE PRÉSENCE / ABSENCE :", level=3)
-        # Split the presence_list into lines for proper formatting
-        presence_lines = extracted_info["presence_list"].split("\n")
-        for line in presence_lines:
-            doc.add_paragraph(line)
+        # Add presence/absence table
+        heading_presence = doc.add_heading("LISTE DE PRÉSENCE / ABSENCE :", level=3)
+        for run in heading_presence.runs:
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        
+        # Parse presence_list into Présents and Absents
+        presence_list = extracted_info["presence_list"]
+        presents = "Non spécifié"
+        absents = "Non spécifié"
+        if "Présents :" in presence_list and "Absents :" in presence_list:
+            parts = presence_list.split("\n")
+            for part in parts:
+                if part.startswith("Présents :"):
+                    presents = part.replace("Présents :", "").strip()
+                elif part.startswith("Absents :"):
+                    absents = part.replace("Absents :", "").strip()
+        else:
+            # If not in the expected format, assume the entire string is the list of presents
+            presents = presence_list if presence_list != "Non spécifié" else "Non spécifié"
+        
+        # Create a 2-column table for presence/absence
+        table = doc.add_table(rows=2, cols=2)
+        table.style = "Table Grid"
+        # Add table headers with red text
+        headers = ["Présence", "Absence"]
+        for j, header in enumerate(headers):
+            cell = table.cell(0, j)
+            cell.text = header
+            for run in cell.paragraphs[0].runs:
+                run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        # Fill the table
+        table.cell(1, 0).text = presents
+        table.cell(1, 1).text = absents
         
         # Add agenda items
-        doc.add_heading("ORDRE DU JOUR :", level=3)
+        heading_agenda = doc.add_heading("ORDRE DU JOUR :", level=3)
+        for run in heading_agenda.runs:
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
         # Split agenda_items into lines
         agenda_lines = extracted_info["agenda_items"].split("\n")
         for line in agenda_lines:
             doc.add_paragraph(line)
         
         # Add resolutions table
-        doc.add_heading("RÉCAPITULATIF DES RÉSOLUTIONS", level=3)
+        heading_resolutions = doc.add_heading("RÉCAPITULATIF DES RÉSOLUTIONS", level=3)
+        for run in heading_resolutions.runs:
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
         resolutions = extracted_info.get("resolutions_summary", [])
         if not resolutions:
             resolutions = [{
@@ -211,11 +252,14 @@ def generate_docx(extracted_info):
             }]
         table = doc.add_table(rows=len(resolutions) + 1, cols=8)
         table.style = "Table Grid"
-        # Add table headers
+        # Add table headers with red text
         headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
         for j, header in enumerate(headers):
-            table.cell(0, j).text = header
-        # Fill table rows
+            cell = table.cell(0, j)
+            cell.text = header
+            for run in cell.paragraphs[0].runs:
+                run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        # Fill table rows with black text
         for row_idx, resolution in enumerate(resolutions, 1):
             table.cell(row_idx, 0).text = resolution.get("date", "Non spécifié")
             table.cell(row_idx, 1).text = resolution.get("dossier", "Non spécifié")
@@ -227,7 +271,9 @@ def generate_docx(extracted_info):
             table.cell(row_idx, 7).text = resolution.get("report_count", "00")
         
         # Add sanctions table
-        doc.add_heading("RÉCAPITULATIF DES SANCTIONS", level=3)
+        heading_sanctions = doc.add_heading("RÉCAPITULATIF DES SANCTIONS", level=3)
+        for run in heading_sanctions.runs:
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
         sanctions = extracted_info.get("sanctions_summary", [])
         if not sanctions:
             sanctions = [{
@@ -239,11 +285,14 @@ def generate_docx(extracted_info):
             }]
         table = doc.add_table(rows=len(sanctions) + 1, cols=5)
         table.style = "Table Grid"
-        # Add table headers
+        # Add table headers with red text
         headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
         for j, header in enumerate(headers):
-            table.cell(0, j).text = header
-        # Fill table rows
+            cell = table.cell(0, j)
+            cell.text = header
+            for run in cell.paragraphs[0].runs:
+                run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        # Fill table rows with black text
         for row_idx, sanction in enumerate(sanctions, 1):
             table.cell(row_idx, 0).text = sanction.get("name", "Aucun")
             table.cell(row_idx, 1).text = sanction.get("reason", "Aucune sanction mentionnée")
@@ -251,10 +300,16 @@ def generate_docx(extracted_info):
             table.cell(row_idx, 3).text = sanction.get("date", extracted_info["date"])
             table.cell(row_idx, 4).text = sanction.get("status", "Non appliqué")
         
+        # Add spacing after the sanctions table
+        doc.add_paragraph("")  # Blank paragraph for spacing
+        doc.add_paragraph("")  # Additional blank paragraph for more spacing
+        
         # Add balance information
-        doc.add_paragraph(
+        balance_para = doc.add_paragraph(
             f"Le solde du compte DRI Solidarité (00001-00921711101-10) est de XAF {extracted_info['balance_amount']} au {extracted_info['balance_date']}."
         )
+        for run in balance_para.runs:
+            run.font.color.rgb = RGBColor(0, 0, 0)  # Black color
         
         # Save the document to a temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
@@ -336,7 +391,31 @@ def main():
         st.header("Détails de la Réunion")
         meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
         meeting_date = st.date_input("Date de la Réunion", datetime.now())
+        start_time = st.text_input("Heure de début (format HHhMMmin, ex: 07h00min)", value="07h00min")
+        end_time = st.text_input("Heure de fin (format HHhMMmin, ex: 10h34min)", value="10h34min")
         attendees = st.text_area("Participants (séparés par des virgules)")
+        
+        st.subheader("Ordre du Jour")
+        agenda_items_container = st.container()
+        if 'agenda_items' not in st.session_state:
+            st.session_state.agenda_items = [""]
+        
+        with agenda_items_container:
+            new_agenda_items = []
+            for i, item in enumerate(st.session_state.agenda_items):
+                cols = st.columns([0.9, 0.1])
+                with cols[0]:
+                    new_item = st.text_input(f"Point {i+1}", item, key=f"agenda_item_{i}")
+                with cols[1]:
+                    if st.button("𝗫", key=f"del_agenda_{i}"):
+                        pass
+                    else:
+                        new_agenda_items.append(new_item)
+            st.session_state.agenda_items = new_agenda_items if new_agenda_items else [""]
+        
+        if st.button("Ajouter un Point à l'Ordre du Jour"):
+            st.session_state.agenda_items.append("")
+            st.rerun()
         
         st.subheader("Points d'Action")
         action_items_container = st.container()
@@ -348,9 +427,9 @@ def main():
             for i, item in enumerate(st.session_state.action_items):
                 cols = st.columns([0.9, 0.1])
                 with cols[0]:
-                    new_item = st.text_input(f"Point {i+1}", item, key=f"item_{i}")
+                    new_item = st.text_input(f"Point d'Action {i+1}", item, key=f"action_item_{i}")
                 with cols[1]:
-                    if st.button("𝗫", key=f"del_{i}"):
+                    if st.button("𝗫", key=f"del_action_{i}"):
                         pass
                     else:
                         new_action_items.append(new_item)
@@ -390,6 +469,7 @@ def main():
             if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
                 edited_transcription = st.session_state.get("edited_transcription", transcription)
                 action_items = [item for item in st.session_state.action_items if item.strip()]
+                agenda_items = [item for item in st.session_state.agenda_items if item.strip()]
                 
                 if st.session_state.api_key:
                     with st.spinner("Extraction des informations avec Deepseek..."):
@@ -407,8 +487,16 @@ def main():
                                 meeting_title,
                                 meeting_date.strftime("%d/%m/%Y"),
                                 attendees,
-                                action_items
+                                action_items,
+                                start_time,
+                                end_time,
+                                agenda_items
                             )
+                        else:
+                            # Override with user inputs
+                            extracted_info["start_time"] = start_time
+                            extracted_info["end_time"] = end_time
+                            extracted_info["agenda_items"] = "\n".join([f"{idx}. {item}" for idx, item in enumerate(agenda_items, 1)]) if agenda_items else "Non spécifié"
                 else:
                     st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
                     extracted_info = extract_info_fallback(
@@ -416,7 +504,10 @@ def main():
                         meeting_title,
                         meeting_date.strftime("%d/%m/%Y"),
                         attendees,
-                        action_items
+                        action_items,
+                        start_time,
+                        end_time,
+                        agenda_items
                     )
                 
                 if extracted_info:
@@ -482,6 +573,8 @@ if __name__ == "__main__":
         st.header("Détails de la Réunion")
         meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
         meeting_date = st.date_input("Date de la Réunion", datetime.now())
+        start_time = st.text_input("Heure de début (format HHhMMmin, ex: 07h00min)", value="07h00min")
+        end_time = st.text_input("Heure de fin (format HHhMMmin, ex: 10h34min)", value="10h34min")
         attendees = st.text_area("Participants (séparés par des virgules)")
         transcription = st.text_area("Transcription (saisie manuelle)", height=300)
         
@@ -490,7 +583,9 @@ if __name__ == "__main__":
                 transcription,
                 meeting_title,
                 meeting_date.strftime("%d/%m/%Y"),
-                attendees
+                attendees,
+                start_time=start_time,
+                end_time=end_time
             )
             st.subheader("Informations Extraites")
             st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
