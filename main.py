@@ -58,7 +58,7 @@ def extract_info(transcription, meeting_title, date, attendees, api_key):
     - "end_time" : L'heure de fin de la réunion (format HHhMMmin, par exemple 10h34min).
     - "presence_list" : Liste des participants présents et absents (chaîne de texte, par exemple "Présents : Alice, Bob\nAbsents : Charlie").
     - "agenda_items" : Liste des points discutés (chaîne de texte avec des sauts de ligne, par exemple "1. Point 1\n2. Point 2").
-    - "resolutions_summary" : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count").
+    - "resolutions_summary" : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). Le champ "dossier" doit refléter le sujet spécifique de la résolution, pas le titre général de la réunion.
     - "sanctions_summary" : Liste de sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status").
     - "balance_amount" : Le solde du compte DRI Solidarité (chaîne de texte, par exemple "682040").
     - "balance_date" : La date du solde (format DD/MM/YYYY, par exemple "06/02/2025").
@@ -90,17 +90,34 @@ def extract_info(transcription, meeting_title, date, attendees, api_key):
             headers=headers,
             json=payload
         )
+        response.raise_for_status()  # Raise an exception for bad status codes
+        
         if response.status_code == 200:
-            raw_response = response.json()["choices"][0]["message"]["content"].strip()
+            raw_response = response.text.strip()
+            if not raw_response:
+                st.error("La réponse de l'API Deepseek est vide.")
+                return None
+            
             st.write(f"Réponse brute de Deepseek : {raw_response}")
             try:
-                return json.loads(raw_response)
+                json_data = json.loads(raw_response)
+                # Validate that the response contains expected keys
+                required_keys = ["date", "start_time", "end_time", "presence_list", "agenda_items", 
+                               "resolutions_summary", "sanctions_summary", "balance_amount", "balance_date"]
+                if not all(key in json_data for key in required_keys):
+                    st.error("La réponse JSON de Deepseek ne contient pas toutes les clés attendues.")
+                    return None
+                return json_data
             except json.JSONDecodeError as e:
                 st.error(f"Erreur lors du parsing JSON : {e}")
+                st.write(f"Contenu de la réponse brute : {raw_response}")
                 return None
         else:
             st.error(f"Erreur API Deepseek : Statut {response.status_code}, Message : {response.text}")
             return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erreur lors de la requête API Deepseek : {e}")
+        return None
     except Exception as e:
         st.error(f"Erreur lors de l'extraction des informations : {e}")
         return None
@@ -123,7 +140,17 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, start_t
         "resolutions_summary": [
             {
                 "date": date,
-                "dossier": meeting_title,
+                "dossier": "Sujet 1",  # Use a distinct dossier name, not the meeting title
+                "resolution": "Non spécifié",
+                "responsible": "Non spécifié",
+                "deadline": "Non spécifié",
+                "execution_date": "",
+                "status": "En cours",
+                "report_count": "00"
+            },
+            {
+                "date": date,
+                "dossier": "Sujet 2",  # Add another distinct dossier for demonstration
                 "resolution": "Non spécifié",
                 "responsible": "Non spécifié",
                 "deadline": "Non spécifié",
@@ -242,7 +269,7 @@ def generate_docx(extracted_info):
         # Fill table rows with black text
         for row_idx, resolution in enumerate(resolutions, 1):
             table.cell(row_idx, 0).text = resolution.get("date", "Non spécifié")
-            table.cell(row_idx, 1).text = resolution.get("dossier", "Non spécifié")
+            table.cell(row_idx, 1).text = resolution.get("dossier", "Non spécifié")  # Ensure dossier is used
             table.cell(row_idx, 2).text = resolution.get("resolution", "Non spécifié")
             table.cell(row_idx, 3).text = resolution.get("responsible", "Non spécifié")
             table.cell(row_idx, 4).text = resolution.get("deadline", "Non spécifié")
