@@ -4,20 +4,26 @@ import tempfile
 from datetime import datetime
 import requests
 from transformers import pipeline
+from docxtpl import DocxTemplate
 from docx import Document
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 import warnings
 import torch
 import torchaudio
+import json
 
-# Suppression des avertissements pour un affichage plus propre
+
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Outil de Transcription de Réunion", page_icon=":microphone:", layout="wide")
 
+# Path to the Word template
+TEMPLATE_PATH = "Template_reunion.docx"
+
 def transcribe_audio(audio_file, file_extension, model_size="base"):
     """Transcrit le fichier audio téléchargé en texte en utilisant le modèle Whisper"""
     try:
-        # Définir le modèle Whisper
         model_id_mapping = {
             "tiny": "openai/whisper-tiny",
             "base": "openai/whisper-base",
@@ -26,38 +32,27 @@ def transcribe_audio(audio_file, file_extension, model_size="base"):
             "large": "openai/whisper-large-v3",
         }
         model_id = model_id_mapping.get(model_size, "openai/whisper-base")
-        
-        # Charger le pipeline Whisper
         transcriber = pipeline("automatic-speech-recognition", model=model_id)
         
-        # Créer un fichier temporaire
         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_audio:
             temp_audio.write(audio_file.getvalue())
             temp_audio_path = temp_audio.name
         
         try:
-            # Charger l'audio avec torchaudio
             waveform, sample_rate = torchaudio.load(temp_audio_path, backend="ffmpeg")
-            
-            # Whisper exige un taux d'échantillonnage de 16 kHz
             if sample_rate != 16000:
                 waveform = torchaudio.functional.resample(waveform, sample_rate, 16000)
-            
-            # Convertir la waveform en un tenseur utilisable par Whisper
-            # Si l'audio est stéréo (2 canaux), convertir en mono en prenant la moyenne
             if waveform.shape[0] > 1:
                 waveform = torch.mean(waveform, dim=0, keepdim=True)
-            
-            # Transcrire l'audio
             result = transcriber({"raw": waveform[0].numpy(), "sampling_rate": 16000}, chunk_length_s=30, stride_length_s=5)
             return result["text"]
-        
         finally:
             os.unlink(temp_audio_path)
-    
     except Exception as e:
         st.error(f"Erreur lors de la transcription audio: {e}")
         return f"Erreur lors de la transcription audio: {e}"
+    
+    
 
 def extract_info(transcription, meeting_title, date, attendees, api_key, action_items=None):
     """Extrait les informations clés de la transcription en utilisant l'API Deepseek"""
@@ -72,24 +67,29 @@ def extract_info(transcription, meeting_title, date, attendees, api_key, action_
         action_items_text = "Aucun point d'action n'a été enregistré."
 
     prompt = f"""
-    Vous êtes un expert en rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez et structurez les informations suivantes en sections claires :
-    - Présence : Liste des participants présents et absents.
-    - Ordre du jour : Points discutés pendant la réunion.
-    - Résolutions : Décisions prises, responsables assignés, et délais.
-    - Sanctions : Sanctions ou pénalités appliquées, si mentionnées.
-    - Informations financières : Soldes, montants, ou autres données financières.
-    
+    Vous êtes un expert en rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez et structurez les informations suivantes pour remplir un modèle de compte rendu de réunion. Retournez les informations sous forme de JSON avec les clés suivantes :
+
+    - "date" : La date de la réunion (format DD/MM/YYYY, par défaut {date}).
+    - "start_time" : L'heure de début de la réunion (format HHhMMmin, par exemple 07h00min).
+    - "end_time" : L'heure de fin de la réunion (format HHhMMmin, par exemple 10h34min).
+    - "presence_list" : Liste des participants présents et absents (chaîne de texte, par exemple "Présents : Alice, Bob\nAbsents : Charlie").
+    - "agenda_items" : Liste des points discutés (chaîne de texte avec des sauts de ligne, par exemple "1. Point 1\n2. Point 2").
+    - "resolutions_summary" : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count").
+    - "sanctions_summary" : Liste de sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status").
+    - "balance_amount" : Le solde du compte DRI Solidarité (chaîne de texte, par exemple "682040").
+    - "balance_date" : La date du solde (format DD/MM/YYYY, par exemple "06/02/2025").
+
     Détails de la Réunion :
     - Titre : {meeting_title}
-    - Date : {date}
-    - Participants : {attendees}
+    - Date par défaut : {date}
+    - Participants fournis : {attendees}
     - Points d'action :
     {action_items_text}
     
     Transcription :
     {transcription}
     
-    Retournez les informations structurées en sections avec des en-têtes clairs, en français.
+    Retournez le résultat sous forme de JSON structuré, en français. Si une information n'est pas trouvée dans la transcription, utilisez des valeurs par défaut raisonnables (par exemple, "Non spécifié" ou la date fournie).
     """
     
     try:
@@ -109,7 +109,7 @@ def extract_info(transcription, meeting_title, date, attendees, api_key, action_
             json=payload
         )
         if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"].strip()
+            return json.loads(response.json()["choices"][0]["message"]["content"].strip())
         else:
             st.error(f"Erreur lors de l'extraction des informations: {response.status_code}")
             return None
@@ -129,60 +129,142 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, action_
     else:
         action_items_text = "Aucun point d'action n'a été enregistré."
     
-    return f"""
-## Présence
-{attendees}
+    return {
+        "date": date,
+        "start_time": "Non spécifié",
+        "end_time": "Non spécifié",
+        "presence_list": attendees if attendees else "Non spécifié",
+        "agenda_items": "Non spécifié dans la transcription.",
+        "resolutions_summary": [
+            {
+                "date": date,
+                "dossier": meeting_title,
+                "resolution": "Non spécifié",
+                "responsible": "Non spécifié",
+                "deadline": "Non spécifié",
+                "execution_date": "",
+                "status": "En cours",
+                "report_count": "00"
+            }
+        ],
+        "sanctions_summary": [
+            {
+                "name": "Aucun",
+                "reason": "Aucune sanction mentionnée",
+                "amount": "0",
+                "date": date,
+                "status": "Non appliqué"
+            }
+        ],
+        "balance_amount": "Non spécifié",
+        "balance_date": date,
+        "action_items": action_items_text,
+        "transcription": transcription
+    }
 
-## Ordre du jour
-Non spécifié dans la transcription.
-
-## Résolutions
-| DATE | DOSSIERS | RÉSOLUTIONS | RESP. | DÉLAI D'EXÉCUTION | DATE D'EXÉCUTION | STATUT | NBR DE REPORT |
-| ---- | -------- | ----------- | ----- | ----------------- | ---------------- | ------ | ------------- |
-| {date} | {meeting_title} | Non spécifié | Non spécifié | Non spécifié | Non spécifié | En cours | 00 |
-
-## Sanctions
-Aucune sanction mentionnée.
-
-## Informations financières
-Aucune information financière mentionnée.
-
-## Points d'action
-{action_items_text}
-
-## Transcription
-{transcription}
-"""
-
-def generate_word_document(extracted_info, meeting_title, date):
-    """Génère un document Word à partir des informations extraites"""
-    doc = Document()
-    doc.add_heading(f"Compte Rendu de Réunion - {meeting_title}", 0)
-    doc.add_paragraph(f"Date : {date}")
-    
-    sections = extracted_info.split("\n\n")
-    for section in sections:
-        lines = section.split("\n")
-        if lines and lines[0].startswith("## "):
-            heading = lines[0].replace("## ", "").strip()
-            doc.add_heading(heading, level=1)
-            content = "\n".join(lines[1:]).strip()
-            if heading == "Résolutions" and content.startswith("|"):
-                table_data = [row.split("|")[1:-1] for row in content.split("\n") if row.startswith("|")]
-                table = doc.add_table(rows=len(table_data), cols=len(table_data[0]))
+def fill_template_and_generate_docx(extracted_info, template_path):
+    """Remplit le modèle Word et génère un document téléchargeable"""
+    try:
+        # Charger le modèle avec docxtpl
+        doc = DocxTemplate(template_path)
+        
+        # Préparer les données pour le modèle
+        context = {
+            "date": extracted_info["date"],
+            "start_time": extracted_info["start_time"],
+            "end_time": extracted_info["end_time"],
+            "presence_list": extracted_info["presence_list"],
+            "agenda_items": extracted_info["agenda_items"],
+            # Les tableaux seront traités après, donc on passe des chaînes vides ici
+            "resolutions_summary": "",
+            "sanctions_summary": "",
+            "balance_amount": extracted_info["balance_amount"],
+            "balance_date": extracted_info["balance_date"]
+        }
+        
+        # Remplir les placeholders simples
+        doc.render(context)
+        
+        # Sauvegarder temporairement le document rempli
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            doc.save(tmp.name)
+            tmp_path = tmp.name
+        
+        # Charger le document avec python-docx pour ajouter les tableaux
+        docx_doc = Document(tmp_path)
+        
+        # Trouver les paragraphes correspondant aux sections "RÉCAPITULATIF DES RÉSOLUTIONS" et "RÉCAPITULATIF DES SANCTIONS"
+        resolutions_found = False
+        sanctions_found = False
+        for i, para in enumerate(docx_doc.paragraphs):
+            if "RÉCAPITULATIF DES RÉSOLUTIONS" in para.text:
+                resolutions_found = True
+                # Ajouter le tableau des résolutions
+                resolutions = extracted_info["resolutions_summary"]
+                table = docx_doc.add_table(rows=len(resolutions) + 1, cols=8)
                 table.style = "Table Grid"
-                for i, row in enumerate(table_data):
-                    for j, cell in enumerate(row):
-                        table.cell(i, j).text = cell.strip()
-            else:
-                doc.add_paragraph(content)
+                # En-têtes du tableau
+                headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
+                for j, header in enumerate(headers):
+                    table.cell(0, j).text = header
+                # Remplir les données
+                for row_idx, resolution in enumerate(resolutions, 1):
+                    table.cell(row_idx, 0).text = resolution["date"]
+                    table.cell(row_idx, 1).text = resolution["dossier"]
+                    table.cell(row_idx, 2).text = resolution["resolution"]
+                    table.cell(row_idx, 3).text = resolution["responsible"]
+                    table.cell(row_idx, 4).text = resolution["deadline"]
+                    table.cell(row_idx, 5).text = resolution["execution_date"]
+                    table.cell(row_idx, 6).text = resolution["status"]
+                    table.cell(row_idx, 7).text = resolution["report_count"]
+                # Déplacer le tableau après le paragraphe
+                para._element.addnext(table._element)
+                para.text = para.text.replace("{{resolutions_summary}}", "")
+            
+            if "RÉCAPITULATIF DES SANCTIONS" in para.text:
+                sanctions_found = True
+                # Ajouter le tableau des sanctions
+                sanctions = extracted_info["sanctions_summary"]
+                table = docx_doc.add_table(rows=len(sanctions) + 1, cols=5)
+                table.style = "Table Grid"
+                # En-têtes du tableau
+                headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
+                for j, header in enumerate(headers):
+                    table.cell(0, j).text = header
+                # Remplir les données
+                for row_idx, sanction in enumerate(sanctions, 1):
+                    table.cell(row_idx, 0).text = sanction["name"]
+                    table.cell(row_idx, 1).text = sanction["reason"]
+                    table.cell(row_idx, 2).text = sanction["amount"]
+                    table.cell(row_idx, 3).text = sanction["date"]
+                    table.cell(row_idx, 4).text = sanction["status"]
+                # Déplacer le tableau après le paragraphe
+                para._element.addnext(table._element)
+                para.text = para.text.replace("{{sanctions_summary}}", "")
+        
+        # Vérifier si les sections ont été trouvées
+        if not resolutions_found:
+            st.warning("Section 'RÉCAPITULATIF DES RÉSOLUTIONS' non trouvée dans le modèle.")
+        if not sanctions_found:
+            st.warning("Section 'RÉCAPITULATIF DES SANCTIONS' non trouvée dans le modèle.")
+        
+        # Sauvegarder le document final
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as final_tmp:
+            docx_doc.save(final_tmp.name)
+            with open(final_tmp.name, "rb") as f:
+                docx_data = f.read()
+            os.unlink(final_tmp.name)
+        
+        # Nettoyer le fichier temporaire initial
+        os.unlink(tmp_path)
+        
+        return docx_data
     
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-        doc.save(tmp.name)
-        with open(tmp.name, "rb") as f:
-            docx_data = f.read()
-        os.unlink(tmp.name)
-    return docx_data
+    except Exception as e:
+        st.error(f"Erreur lors de la génération du document Word: {e}")
+        return None
+    
+
 
 def main():
     st.title("Outil de Transcription Audio de Réunion")
@@ -200,14 +282,19 @@ def main():
         """)
     
     try:
+        from docxtpl import DocxTemplate
         from docx import Document
         DOCX_AVAILABLE = True
     except ImportError:
         DOCX_AVAILABLE = False
         st.warning("""
-        ⚠️ La bibliothèque python-docx n'est pas installée.
-        Exécutez : `pip install python-docx`
+        ⚠️ Les bibliothèques docxtpl et python-docx ne sont pas installées.
+        Exécutez : `pip install docxtpl python-docx`
         """)
+    
+    # Vérifier si le modèle existe
+    if not os.path.exists(TEMPLATE_PATH):
+        st.error(f"Le modèle Word {TEMPLATE_PATH} n'est pas trouvé. Veuillez placer le fichier dans le même répertoire que le script.")
     
     # Initialisation de l'état
     if 'api_key' not in st.session_state:
@@ -308,21 +395,18 @@ def main():
                         if extracted_info:
                             st.session_state.extracted_info = extracted_info
                             st.subheader("Informations Extraites")
-                            st.text_area("Aperçu:", extracted_info, height=300)
+                            st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
                             
                             with st.spinner("Génération du document Word..."):
-                                docx_data = generate_word_document(
-                                    extracted_info,
-                                    meeting_title,
-                                    meeting_date.strftime("%d/%m/%Y")
-                                )
+                                docx_data = fill_template_and_generate_docx(extracted_info, TEMPLATE_PATH)
                             
-                            st.download_button(
-                                label="Télécharger les Notes de Réunion",
-                                data=docx_data,
-                                file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
+                            if docx_data:
+                                st.download_button(
+                                    label="Télécharger les Notes de Réunion",
+                                    data=docx_data,
+                                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                )
             
             elif hasattr(st.session_state, 'transcription') and WHISPER_AVAILABLE:
                 st.subheader("Transcription Brute")
@@ -355,39 +439,33 @@ def main():
                     if extracted_info:
                         st.session_state.extracted_info = extracted_info
                         st.subheader("Informations Extraites")
-                        st.text_area("Aperçu:", extracted_info, height=300)
+                        st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
                         
                         with st.spinner("Génération du document Word..."):
-                            docx_data = generate_word_document(
-                                extracted_info,
-                                meeting_title,
-                                meeting_date.strftime("%d/%m/%Y")
-                            )
+                            docx_data = fill_template_and_generate_docx(extracted_info, TEMPLATE_PATH)
                         
-                        st.download_button(
-                            label="Télécharger les Notes de Réunion",
-                            data=docx_data,
-                            file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
+                        if docx_data:
+                            st.download_button(
+                                label="Télécharger les Notes de Réunion",
+                                data=docx_data,
+                                file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            )
             
             elif hasattr(st.session_state, 'extracted_info') and DOCX_AVAILABLE:
                 st.subheader("Informations Extraites")
-                st.text_area("Aperçu:", st.session_state.extracted_info, height=300)
+                st.text_area("Aperçu:", json.dumps(st.session_state.extracted_info, indent=2, ensure_ascii=False), height=300)
                 
                 with st.spinner("Génération du document Word..."):
-                    docx_data = generate_word_document(
-                        st.session_state.extracted_info,
-                        meeting_title,
-                        meeting_date.strftime("%d/%m/%Y")
-                    )
+                    docx_data = fill_template_and_generate_docx(st.session_state.extracted_info, TEMPLATE_PATH)
                 
-                st.download_button(
-                    label="Télécharger les Notes de Réunion",
-                    data=docx_data,
-                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                if docx_data:
+                    st.download_button(
+                        label="Télécharger les Notes de Réunion",
+                        data=docx_data,
+                        file_name=f"{meeting_title}_{datetime.now().strftime('%Y-%m-%d')}_notes.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
 
 if __name__ == "__main__":
     try:
@@ -399,7 +477,7 @@ if __name__ == "__main__":
         Si vous rencontrez des erreurs, essayez les solutions suivantes :
         1. Installez toutes les dépendances :
            ```
-           pip install streamlit transformers torch torchaudio python-docx requests
+           pip install streamlit transformers torch torchaudio docxtpl python-docx requests
            ```
         2. Pour Streamlit Cloud, assurez-vous d'avoir un fichier `requirements.txt` :
            ```
@@ -407,6 +485,7 @@ if __name__ == "__main__":
            transformers>=4.30.0
            torch>=2.0.1
            torchaudio>=2.0.2
+           docxtpl>=0.16.7
            python-docx>=0.8.11
            requests>=2.28.0
            ```
@@ -414,6 +493,7 @@ if __name__ == "__main__":
            - Sur Ubuntu : `sudo apt-get install ffmpeg`
            - Sur macOS : `brew install ffmpeg`
            - Sur Windows : Téléchargez depuis https://ffmpeg.org/download.html
+        4. Assurez-vous que le modèle Word (Template_reunion.docx) est dans le même répertoire que le script et utilise la syntaxe {{placeholder}} pour les placeholders.
         """)
         
         st.title("Mode Secours")
@@ -425,38 +505,23 @@ if __name__ == "__main__":
         transcription = st.text_area("Transcription (saisie manuelle)", height=300)
         
         if st.button("Formater les Notes de Réunion"):
-            extracted_info = f"""
-## Présence
-{attendees}
-
-## Ordre du jour
-Non spécifié.
-
-## Résolutions
-| DATE | DOSSIERS | RÉSOLUTIONS | RESP. | DÉLAI D'EXÉCUTION | DATE D'EXÉCUTION | STATUT | NBR DE REPORT |
-| ---- | -------- | ----------- | ----- | ----------------- | ---------------- | ------ | ------------- |
-| {meeting_date.strftime("%d/%m/%Y")} | {meeting_title} | Non spécifié | Non spécifié | Non spécifié | Non spécifié | En cours | 00 |
-
-## Sanctions
-Aucune sanction mentionnée.
-
-## Informations financières
-Aucune information financière mentionnée.
-
-## Transcription
-{transcription}
-"""
+            extracted_info = extract_info_fallback(
+                transcription,
+                meeting_title,
+                meeting_date.strftime("%d/%m/%Y"),
+                attendees
+            )
             st.subheader("Informations Extraites")
-            st.text_area("Aperçu:", extracted_info, height=300)
+            st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
             
             try:
-                from docx import Document
-                docx_data = generate_word_document(extracted_info, meeting_title, meeting_date.strftime("%d/%m/%Y"))
-                st.download_button(
-                    label="Télécharger les Notes de Réunion",
-                    data=docx_data,
-                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-            except ImportError:
-                st.warning("python-docx n'est pas installé. Téléchargement impossible.")
+                docx_data = fill_template_and_generate_docx(extracted_info, TEMPLATE_PATH)
+                if docx_data:
+                    st.download_button(
+                        label="Télécharger les Notes de Réunion",
+                        data=docx_data,
+                        file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+            except Exception as e:
+                st.warning(f"Erreur lors de la génération du document: {e}")
