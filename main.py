@@ -13,7 +13,7 @@ import torch
 import torchaudio
 import json
 
-
+# Suppression des avertissements pour un affichage plus propre
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Outil de Transcription de Réunion", page_icon=":microphone:", layout="wide")
@@ -51,8 +51,6 @@ def transcribe_audio(audio_file, file_extension, model_size="base"):
     except Exception as e:
         st.error(f"Erreur lors de la transcription audio: {e}")
         return f"Erreur lors de la transcription audio: {e}"
-    
-    
 
 def extract_info(transcription, meeting_title, date, attendees, api_key, action_items=None):
     """Extrait les informations clés de la transcription en utilisant l'API Deepseek"""
@@ -89,7 +87,7 @@ def extract_info(transcription, meeting_title, date, attendees, api_key, action_
     Transcription :
     {transcription}
     
-    Retournez le résultat sous forme de JSON structuré, en français. Si une information n'est pas trouvée dans la transcription, utilisez des valeurs par défaut raisonnables (par exemple, "Non spécifié" ou la date fournie).
+    Retournez le résultat sous forme de JSON structuré, en français. Si une information n'est pas trouvée dans la transcription, utilisez des valeurs par défaut raisonnables (par exemple, "Non spécifié" ou la date fournie). Assurez-vous que le JSON est bien formé.
     """
     
     try:
@@ -109,7 +107,12 @@ def extract_info(transcription, meeting_title, date, attendees, api_key, action_
             json=payload
         )
         if response.status_code == 200:
-            return json.loads(response.json()["choices"][0]["message"]["content"].strip())
+            response_text = response.json()["choices"][0]["message"]["content"].strip()
+            try:
+                return json.loads(response_text)
+            except json.JSONDecodeError as e:
+                st.error(f"Erreur lors du parsing de la réponse Deepseek en JSON: {e}. Utilisation du mode de secours.")
+                return None
         else:
             st.error(f"Erreur lors de l'extraction des informations: {response.status_code}")
             return None
@@ -165,6 +168,10 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, action_
 def fill_template_and_generate_docx(extracted_info, template_path):
     """Remplit le modèle Word et génère un document téléchargeable"""
     try:
+        # Vérifier si le modèle existe
+        if not os.path.exists(template_path):
+            raise FileNotFoundError(f"Le fichier modèle {template_path} n'est pas trouvé.")
+        
         # Charger le modèle avec docxtpl
         doc = DocxTemplate(template_path)
         
@@ -200,7 +207,18 @@ def fill_template_and_generate_docx(extracted_info, template_path):
             if "RÉCAPITULATIF DES RÉSOLUTIONS" in para.text:
                 resolutions_found = True
                 # Ajouter le tableau des résolutions
-                resolutions = extracted_info["resolutions_summary"]
+                resolutions = extracted_info.get("resolutions_summary", [])
+                if not resolutions:
+                    resolutions = [{
+                        "date": extracted_info["date"],
+                        "dossier": "Non spécifié",
+                        "resolution": "Non spécifié",
+                        "responsible": "Non spécifié",
+                        "deadline": "Non spécifié",
+                        "execution_date": "",
+                        "status": "En cours",
+                        "report_count": "00"
+                    }]
                 table = docx_doc.add_table(rows=len(resolutions) + 1, cols=8)
                 table.style = "Table Grid"
                 # En-têtes du tableau
@@ -209,14 +227,14 @@ def fill_template_and_generate_docx(extracted_info, template_path):
                     table.cell(0, j).text = header
                 # Remplir les données
                 for row_idx, resolution in enumerate(resolutions, 1):
-                    table.cell(row_idx, 0).text = resolution["date"]
-                    table.cell(row_idx, 1).text = resolution["dossier"]
-                    table.cell(row_idx, 2).text = resolution["resolution"]
-                    table.cell(row_idx, 3).text = resolution["responsible"]
-                    table.cell(row_idx, 4).text = resolution["deadline"]
-                    table.cell(row_idx, 5).text = resolution["execution_date"]
-                    table.cell(row_idx, 6).text = resolution["status"]
-                    table.cell(row_idx, 7).text = resolution["report_count"]
+                    table.cell(row_idx, 0).text = resolution.get("date", "Non spécifié")
+                    table.cell(row_idx, 1).text = resolution.get("dossier", "Non spécifié")
+                    table.cell(row_idx, 2).text = resolution.get("resolution", "Non spécifié")
+                    table.cell(row_idx, 3).text = resolution.get("responsible", "Non spécifié")
+                    table.cell(row_idx, 4).text = resolution.get("deadline", "Non spécifié")
+                    table.cell(row_idx, 5).text = resolution.get("execution_date", "")
+                    table.cell(row_idx, 6).text = resolution.get("status", "En cours")
+                    table.cell(row_idx, 7).text = resolution.get("report_count", "00")
                 # Déplacer le tableau après le paragraphe
                 para._element.addnext(table._element)
                 para.text = para.text.replace("{{resolutions_summary}}", "")
@@ -224,7 +242,15 @@ def fill_template_and_generate_docx(extracted_info, template_path):
             if "RÉCAPITULATIF DES SANCTIONS" in para.text:
                 sanctions_found = True
                 # Ajouter le tableau des sanctions
-                sanctions = extracted_info["sanctions_summary"]
+                sanctions = extracted_info.get("sanctions_summary", [])
+                if not sanctions:
+                    sanctions = [{
+                        "name": "Aucun",
+                        "reason": "Aucune sanction mentionnée",
+                        "amount": "0",
+                        "date": extracted_info["date"],
+                        "status": "Non appliqué"
+                    }]
                 table = docx_doc.add_table(rows=len(sanctions) + 1, cols=5)
                 table.style = "Table Grid"
                 # En-têtes du tableau
@@ -233,20 +259,67 @@ def fill_template_and_generate_docx(extracted_info, template_path):
                     table.cell(0, j).text = header
                 # Remplir les données
                 for row_idx, sanction in enumerate(sanctions, 1):
-                    table.cell(row_idx, 0).text = sanction["name"]
-                    table.cell(row_idx, 1).text = sanction["reason"]
-                    table.cell(row_idx, 2).text = sanction["amount"]
-                    table.cell(row_idx, 3).text = sanction["date"]
-                    table.cell(row_idx, 4).text = sanction["status"]
+                    table.cell(row_idx, 0).text = sanction.get("name", "Aucun")
+                    table.cell(row_idx, 1).text = sanction.get("reason", "Aucune sanction mentionnée")
+                    table.cell(row_idx, 2).text = sanction.get("amount", "0")
+                    table.cell(row_idx, 3).text = sanction.get("date", extracted_info["date"])
+                    table.cell(row_idx, 4).text = sanction.get("status", "Non appliqué")
                 # Déplacer le tableau après le paragraphe
                 para._element.addnext(table._element)
                 para.text = para.text.replace("{{sanctions_summary}}", "")
         
-        # Vérifier si les sections ont été trouvées
+        # Si les sections n'ont pas été trouvées, ajouter les tableaux à la fin
         if not resolutions_found:
-            st.warning("Section 'RÉCAPITULATIF DES RÉSOLUTIONS' non trouvée dans le modèle.")
+            docx_doc.add_heading("RÉCAPITULATIF DES RÉSOLUTIONS", level=1)
+            resolutions = extracted_info.get("resolutions_summary", [])
+            if not resolutions:
+                resolutions = [{
+                    "date": extracted_info["date"],
+                    "dossier": "Non spécifié",
+                    "resolution": "Non spécifié",
+                    "responsible": "Non spécifié",
+                    "deadline": "Non spécifié",
+                    "execution_date": "",
+                    "status": "En cours",
+                    "report_count": "00"
+                }]
+            table = docx_doc.add_table(rows=len(resolutions) + 1, cols=8)
+            table.style = "Table Grid"
+            headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
+            for j, header in enumerate(headers):
+                table.cell(0, j).text = header
+            for row_idx, resolution in enumerate(resolutions, 1):
+                table.cell(row_idx, 0).text = resolution.get("date", "Non spécifié")
+                table.cell(row_idx, 1).text = resolution.get("dossier", "Non spécifié")
+                table.cell(row_idx, 2).text = resolution.get("resolution", "Non spécifié")
+                table.cell(row_idx, 3).text = resolution.get("responsible", "Non spécifié")
+                table.cell(row_idx, 4).text = resolution.get("deadline", "Non spécifié")
+                table.cell(row_idx, 5).text = resolution.get("execution_date", "")
+                table.cell(row_idx, 6).text = resolution.get("status", "En cours")
+                table.cell(row_idx, 7).text = resolution.get("report_count", "00")
+        
         if not sanctions_found:
-            st.warning("Section 'RÉCAPITULATIF DES SANCTIONS' non trouvée dans le modèle.")
+            docx_doc.add_heading("RÉCAPITULATIF DES SANCTIONS", level=1)
+            sanctions = extracted_info.get("sanctions_summary", [])
+            if not sanctions:
+                sanctions = [{
+                    "name": "Aucun",
+                    "reason": "Aucune sanction mentionnée",
+                    "amount": "0",
+                    "date": extracted_info["date"],
+                    "status": "Non appliqué"
+                }]
+            table = docx_doc.add_table(rows=len(sanctions) + 1, cols=5)
+            table.style = "Table Grid"
+            headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
+            for j, header in enumerate(headers):
+                table.cell(0, j).text = header
+            for row_idx, sanction in enumerate(sanctions, 1):
+                table.cell(row_idx, 0).text = sanction.get("name", "Aucun")
+                table.cell(row_idx, 1).text = sanction.get("reason", "Aucune sanction mentionnée")
+                table.cell(row_idx, 2).text = sanction.get("amount", "0")
+                table.cell(row_idx, 3).text = sanction.get("date", extracted_info["date"])
+                table.cell(row_idx, 4).text = sanction.get("status", "Non appliqué")
         
         # Sauvegarder le document final
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as final_tmp:
@@ -262,9 +335,13 @@ def fill_template_and_generate_docx(extracted_info, template_path):
     
     except Exception as e:
         st.error(f"Erreur lors de la génération du document Word: {e}")
+        st.write("""
+        Assurez-vous que :
+        - Le fichier Template_reunion.docx utilise la syntaxe {{placeholder}} pour les placeholders (par exemple, {{date}} au lieu de [Date]).
+        - Le fichier n'est pas ouvert dans une autre application.
+        - Vous avez les permissions nécessaires pour écrire des fichiers temporaires.
+        """)
         return None
-    
-
 
 def main():
     st.title("Outil de Transcription Audio de Réunion")
@@ -382,6 +459,14 @@ def main():
                                     st.session_state.api_key,
                                     action_items
                                 )
+                                if not extracted_info:
+                                    extracted_info = extract_info_fallback(
+                                        edited_transcription,
+                                        meeting_title,
+                                        meeting_date.strftime("%d/%m/%Y"),
+                                        attendees,
+                                        action_items
+                                    )
                         else:
                             st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
                             extracted_info = extract_info_fallback(
@@ -426,6 +511,14 @@ def main():
                                 st.session_state.api_key,
                                 action_items
                             )
+                            if not extracted_info:
+                                extracted_info = extract_info_fallback(
+                                    edited_transcription,
+                                    meeting_title,
+                                    meeting_date.strftime("%d/%m/%Y"),
+                                    attendees,
+                                    action_items
+                                )
                     else:
                         st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
                         extracted_info = extract_info_fallback(
@@ -493,7 +586,8 @@ if __name__ == "__main__":
            - Sur Ubuntu : `sudo apt-get install ffmpeg`
            - Sur macOS : `brew install ffmpeg`
            - Sur Windows : Téléchargez depuis https://ffmpeg.org/download.html
-        4. Assurez-vous que le modèle Word (Template_reunion.docx) est dans le même répertoire que le script et utilise la syntaxe {{placeholder}} pour les placeholders.
+        4. Assurez-vous que le modèle Word (Template_reunion.docx) est dans le même répertoire que le script et utilise la syntaxe {{placeholder}} pour les placeholders (par exemple, {{date}} au lieu de [Date]).
+        5. Vérifiez que le fichier modèle n'est pas ouvert dans une autre application pendant l'exécution.
         """)
         
         st.title("Mode Secours")
