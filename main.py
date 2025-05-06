@@ -48,18 +48,8 @@ def transcribe_audio(audio_file, file_extension, model_size="base"):
         st.error(f"Erreur lors de la transcription audio: {e}")
         return f"Erreur lors de la transcription audio: {e}"
 
-def extract_info(transcription, meeting_title, date, attendees, api_key, action_items=None):
+def extract_info(transcription, meeting_title, date, attendees, api_key):
     """Extract key information from the transcription using Deepseek API"""
-    if action_items is None:
-        action_items = []
-    
-    action_items_text = ""
-    if action_items:
-        for idx, item in enumerate(action_items, 1):
-            action_items_text += f"{idx}. {item}\n"
-    else:
-        action_items_text = "Aucun point d'action n'a été enregistré."
-
     prompt = f"""
     Vous êtes un expert en rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez et structurez les informations suivantes pour remplir un modèle de compte rendu de réunion. Retournez les informations sous forme de JSON avec les clés suivantes :
 
@@ -77,8 +67,6 @@ def extract_info(transcription, meeting_title, date, attendees, api_key, action_
     - Titre : {meeting_title}
     - Date par défaut : {date}
     - Participants fournis : {attendees}
-    - Points d'action :
-    {action_items_text}
     
     Transcription :
     {transcription}
@@ -117,19 +105,12 @@ def extract_info(transcription, meeting_title, date, attendees, api_key, action_
         st.error(f"Erreur lors de l'extraction des informations : {e}")
         return None
 
-def extract_info_fallback(transcription, meeting_title, date, attendees, action_items=None, start_time="Non spécifié", end_time="Non spécifié", agenda_items=None):
+def extract_info_fallback(transcription, meeting_title, date, attendees, start_time="Non spécifié", end_time="Non spécifié", agenda_items=None, balance_amount="Non spécifié", balance_date=None):
     """Fallback mode for structuring information if Deepseek API fails"""
-    if action_items is None:
-        action_items = []
     if agenda_items is None:
         agenda_items = ["Non spécifié dans la transcription."]
-    
-    action_items_text = ""
-    if action_items:
-        for idx, item in enumerate(action_items, 1):
-            action_items_text += f"{idx}. {item}\n"
-    else:
-        action_items_text = "Aucun point d'action n'a été enregistré."
+    if balance_date is None:
+        balance_date = date
     
     agenda_text = "\n".join([f"{idx}. {item}" for idx, item in enumerate(agenda_items, 1)])
     
@@ -160,9 +141,8 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, action_
                 "status": "Non appliqué"
             }
         ],
-        "balance_amount": "Non spécifié",
-        "balance_date": date,
-        "action_items": action_items_text,
+        "balance_amount": balance_amount,
+        "balance_date": balance_date,
         "transcription": transcription
     }
 
@@ -417,27 +397,9 @@ def main():
             st.session_state.agenda_items.append("")
             st.rerun()
         
-        st.subheader("Points d'Action")
-        action_items_container = st.container()
-        if 'action_items' not in st.session_state:
-            st.session_state.action_items = [""]
-        
-        with action_items_container:
-            new_action_items = []
-            for i, item in enumerate(st.session_state.action_items):
-                cols = st.columns([0.9, 0.1])
-                with cols[0]:
-                    new_item = st.text_input(f"Point d'Action {i+1}", item, key=f"action_item_{i}")
-                with cols[1]:
-                    if st.button("𝗫", key=f"del_action_{i}"):
-                        pass
-                    else:
-                        new_action_items.append(new_item)
-            st.session_state.action_items = new_action_items if new_action_items else [""]
-        
-        if st.button("Ajouter un Point d'Action"):
-            st.session_state.action_items.append("")
-            st.rerun()
+        st.subheader("Solde du Compte DRI Solidarité")
+        balance_amount = st.text_input("Solde (en XAF, ex: 682040)", value="682040")
+        balance_date = st.date_input("Date du solde", value=meeting_date)
     
     with col2:
         st.header("Transcription & Sortie")
@@ -468,7 +430,6 @@ def main():
             
             if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
                 edited_transcription = st.session_state.get("edited_transcription", transcription)
-                action_items = [item for item in st.session_state.action_items if item.strip()]
                 agenda_items = [item for item in st.session_state.agenda_items if item.strip()]
                 
                 if st.session_state.api_key:
@@ -478,8 +439,7 @@ def main():
                             meeting_title,
                             meeting_date.strftime("%d/%m/%Y"),
                             attendees,
-                            st.session_state.api_key,
-                            action_items
+                            st.session_state.api_key
                         )
                         if not extracted_info:
                             extracted_info = extract_info_fallback(
@@ -487,16 +447,19 @@ def main():
                                 meeting_title,
                                 meeting_date.strftime("%d/%m/%Y"),
                                 attendees,
-                                action_items,
                                 start_time,
                                 end_time,
-                                agenda_items
+                                agenda_items,
+                                balance_amount,
+                                balance_date.strftime("%d/%m/%Y")
                             )
                         else:
                             # Override with user inputs
                             extracted_info["start_time"] = start_time
                             extracted_info["end_time"] = end_time
                             extracted_info["agenda_items"] = "\n".join([f"{idx}. {item}" for idx, item in enumerate(agenda_items, 1)]) if agenda_items else "Non spécifié"
+                            extracted_info["balance_amount"] = balance_amount
+                            extracted_info["balance_date"] = balance_date.strftime("%d/%m/%Y")
                 else:
                     st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
                     extracted_info = extract_info_fallback(
@@ -504,10 +467,11 @@ def main():
                         meeting_title,
                         meeting_date.strftime("%d/%m/%Y"),
                         attendees,
-                        action_items,
                         start_time,
                         end_time,
-                        agenda_items
+                        agenda_items,
+                        balance_amount,
+                        balance_date.strftime("%d/%m/%Y")
                     )
                 
                 if extracted_info:
@@ -576,6 +540,8 @@ if __name__ == "__main__":
         start_time = st.text_input("Heure de début (format HHhMMmin, ex: 07h00min)", value="07h00min")
         end_time = st.text_input("Heure de fin (format HHhMMmin, ex: 10h34min)", value="10h34min")
         attendees = st.text_area("Participants (séparés par des virgules)")
+        balance_amount = st.text_input("Solde du compte DRI Solidarité (en XAF, ex: 682040)", value="682040")
+        balance_date = st.date_input("Date du solde", value=meeting_date)
         transcription = st.text_area("Transcription (saisie manuelle)", height=300)
         
         if st.button("Formater les Notes de Réunion"):
@@ -585,7 +551,9 @@ if __name__ == "__main__":
                 meeting_date.strftime("%d/%m/%Y"),
                 attendees,
                 start_time=start_time,
-                end_time=end_time
+                end_time=end_time,
+                balance_amount=balance_amount,
+                balance_date=balance_date.strftime("%d/%m/%Y")
             )
             st.subheader("Informations Extraites")
             st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
