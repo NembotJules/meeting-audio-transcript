@@ -4,9 +4,9 @@ import tempfile
 from datetime import datetime
 import requests
 from transformers import pipeline
-from docxtpl import DocxTemplate
 from docx import Document
-from docx.shared import RGBColor
+from docx.shared import Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 import warnings
 import torch
 import torchaudio
@@ -165,15 +165,10 @@ def to_roman(num):
     return roman_numerals.get(num, str(num))
 
 def fill_template_and_generate_docx(extracted_info):
-    """Fill the Word template with extracted info using a hybrid approach"""
+    """Build the Word document from scratch using python-docx"""
     try:
-        # Load the template
-        template_path = "Template_reunion (1).docx"
-        if not os.path.exists(template_path):
-            st.error(f"Le fichier de modèle '{template_path}' n'existe pas. Assurez-vous qu'il est dans le répertoire de travail.")
-            return None
-        
-        doc = DocxTemplate(template_path)
+        # Create a new document
+        doc = Document()
         
         # Parse presence_list into lists of present and absent attendees
         presence_list = extracted_info["presence_list"]
@@ -195,84 +190,102 @@ def fill_template_and_generate_docx(extracted_info):
         agenda_list = extracted_info["agenda_items"].split("\n") if extracted_info["agenda_items"] else ["Non spécifié"]
         agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip()]
         
-        # Prepare the context for docxtpl (non-table placeholders only)
-        context = {
-            "date": extracted_info["date"],
-            "start_time": extracted_info["start_time"],
-            "end_time": extracted_info["end_time"],
-            "account_balance": extracted_info["balance_amount"],
-            "balance_date": extracted_info["balance_date"],
-        }
+        # --- Header Section ---
+        p = doc.add_paragraph("Direction Recherches et Investissements")
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(12)
+        run.font.bold = True
         
-        # Log the context for debugging
-        st.write("Contexte pour le modèle (docxtpl) :", context)
+        p = doc.add_paragraph("COMPTE RENDU RÉUNION HEBDOMADAIRE")
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(12)
+        run.font.bold = True
         
-        # Render the template with docxtpl (for non-table placeholders)
-        doc.render(context)
+        doc.add_paragraph()  # Spacer
         
-        # Save the rendered document to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-            doc.save(tmp.name)
-            # Load the rendered document with python-docx to populate tables
-            rendered_doc = Document(tmp.name)
+        # --- Date ---
+        p = doc.add_paragraph(extracted_info["date"])
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(11)
         
-        # Populate the attendance table
-        attendance_table_found = False
-        for table in rendered_doc.tables:
-            if len(table.rows) > 0 and len(table.columns) == 2:
-                cell_0_0 = table.cell(0, 0)
-                cell_0_1 = table.cell(0, 1)
-                if cell_0_0 and cell_0_1:
-                    cell_0_0_text = cell_0_0.text.strip() if cell_0_0.text else ""
-                    cell_0_1_text = cell_0_1.text.strip() if cell_0_1.text else ""
-                    if "PRÉSENCES" in cell_0_0_text and "ABSENCES" in cell_0_1_text:
-                        attendance_table_found = True
-                        row_index = 1  # Start after header
-                        for present in present_attendees:
-                            if present and present != "Non spécifié":
-                                if row_index < len(table.rows):
-                                    table.cell(row_index, 0).text = present
-                                else:
-                                    new_row = table.add_row()
-                                    new_row.cells[0].text = present
-                                row_index += 1
-                        
-                        row_index = 1  # Reset for absents
-                        for absent in absent_attendees:
-                            if absent and absent != "Non spécifié":
-                                if row_index < len(table.rows):
-                                    table.cell(row_index, 1).text = absent
-                                else:
-                                    new_row = table.add_row()
-                                    new_row.cells[1].text = absent
-                                row_index += 1
-                        break
-        if not attendance_table_found:
-            st.warning("Tableau de présence non trouvé ou mal formé dans le modèle.")
+        doc.add_paragraph()  # Spacer
         
-        # Populate the agenda items
-        agenda_inserted = False
-        for i, paragraph in enumerate(rendered_doc.paragraphs):
-            if paragraph.text and "ORDRE DU JOUR :" in paragraph.text:
-                # Ensure there are enough paragraphs after this one
-                if i + 1 >= len(rendered_doc.paragraphs):
-                    rendered_doc.add_paragraph("Placeholder")  # Add a placeholder paragraph
-                for j, item in enumerate(agenda_list):
-                    if j == 0:
-                        # Replace the first agenda item paragraph
-                        rendered_doc.paragraphs[i + 1].text = item
-                    else:
-                        # Insert new paragraphs for additional items
-                        if i + j + 1 < len(rendered_doc.paragraphs):
-                            rendered_doc.paragraphs[i + j + 1].text = item
-                        else:
-                            rendered_doc.add_paragraph(item)
-                agenda_inserted = True
-                break
-        if not agenda_inserted:
-            st.warning("Section 'ORDRE DU JOUR :' non trouvée dans le modèle.")
+        # --- Start and End Time ---
+        p = doc.add_paragraph(f"Heure début : {extracted_info['start_time']}")
+        run = p.runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(11)
         
-        # Populate the resolutions table
+        p = doc.add_paragraph(f"Heure de fin : {extracted_info['end_time']}")
+        run = p.runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(11)
+        
+        doc.add_paragraph()  # Spacer
+        
+        # --- Attendance Table ---
+        p = doc.add_paragraph("LISTE DE PRÉSENCE / ABSENCE :")
+        run = p.runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(11)
+        run.font.bold = True
+        
+        max_rows = max(len(present_attendees), len(absent_attendees))
+        if max_rows == 0:
+            max_rows = 1
+        attendance_table = doc.add_table(rows=max_rows + 1, cols=2)
+        try:
+            attendance_table.style = "Table Grid"
+        except KeyError:
+            st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
+        
+        # Header row
+        headers = ["PRÉSENCES", "ABSENCES"]
+        for j, header in enumerate(headers):
+            cell = attendance_table.cell(0, j)
+            cell.text = header
+            run = cell.paragraphs[0].runs[0]
+            run.font.name = "Arial"
+            run.font.size = Pt(11)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        
+        # Data rows
+        for i in range(max_rows):
+            row = attendance_table.rows[i + 1]
+            present_text = present_attendees[i] if i < len(present_attendees) and present_attendees[i] != "Non spécifié" else ""
+            absent_text = absent_attendees[i] if i < len(absent_attendees) and absent_attendees[i] != "Non spécifié" else ""
+            row.cells[0].text = present_text
+            row.cells[1].text = absent_text
+            for cell in row.cells:
+                run = cell.paragraphs[0].runs[0]
+                run.font.name = "Arial"
+                run.font.size = Pt(11)
+        
+        doc.add_paragraph()  # Spacer
+        
+        # --- Agenda Items ---
+        p = doc.add_paragraph("ORDRE DU JOUR :")
+        run = p.runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(11)
+        run.font.bold = True
+        
+        for item in agenda_list:
+            p = doc.add_paragraph(item)
+            run = p.runs[0]
+            run.font.name = "Arial"
+            run.font.size = Pt(11)
+        
+        doc.add_paragraph()  # Spacer
+        
+        # --- Resolutions Table ---
         resolutions = extracted_info.get("resolutions_summary", [])
         if not resolutions:
             resolutions = [{
@@ -286,40 +299,49 @@ def fill_template_and_generate_docx(extracted_info):
                 "report_count": "00"
             }]
         
-        resolutions_table_found = False
-        for table in rendered_doc.tables:
-            if len(table.rows) > 0 and len(table.columns) >= 8:
-                # Safely collect cell texts
-                cell_texts = []
-                for row in table.rows:
-                    for cell in row.cells:
-                        if cell.text:
-                            cell_texts.append(cell.text.strip())
-                cell_text = ' '.join(cell_texts)
-                if "NBR DE REPORT" in cell_text:
-                    resolutions_table_found = True
-                    for i, resolution in enumerate(resolutions):
-                        row_index = i + 1  # Skip header
-                        if row_index < len(table.rows):
-                            row = table.rows[row_index]
-                        else:
-                            row = table.add_row()
-                        if len(row.cells) >= 8:
-                            row.cells[0].text = resolution.get("date", "")
-                            row.cells[1].text = resolution.get("dossier", "")
-                            row.cells[2].text = resolution.get("resolution", "")
-                            row.cells[3].text = resolution.get("responsible", "")
-                            row.cells[4].text = resolution.get("deadline", "")
-                            row.cells[5].text = resolution.get("execution_date", "")
-                            row.cells[6].text = resolution.get("status", "")
-                            row.cells[7].text = str(resolution.get("report_count", ""))
-                        else:
-                            st.warning(f"Ligne {row_index} du tableau des résolutions n'a pas assez de cellules (attendues: 8, trouvées: {len(row.cells)}).")
-                    break
-        if not resolutions_table_found:
-            st.warning("Tableau des résolutions non trouvé ou mal formé dans le modèle.")
+        p = doc.add_paragraph("RÉCAPITULATIF DES RÉSOLUTIONS")
+        run = p.runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
         
-        # Populate the sanctions table
+        resolutions_table = doc.add_table(rows=len(resolutions) + 1, cols=8)
+        try:
+            resolutions_table.style = "Table Grid"
+        except KeyError:
+            st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
+        
+        # Header row
+        headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
+        for j, header in enumerate(headers):
+            cell = resolutions_table.cell(0, j)
+            cell.text = header
+            run = cell.paragraphs[0].runs[0]
+            run.font.name = "Arial"
+            run.font.size = Pt(11)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        
+        # Data rows
+        for i, resolution in enumerate(resolutions):
+            row = resolutions_table.rows[i + 1]
+            row.cells[0].text = resolution.get("date", "")
+            row.cells[1].text = resolution.get("dossier", "")
+            row.cells[2].text = resolution.get("resolution", "")
+            row.cells[3].text = resolution.get("responsible", "")
+            row.cells[4].text = resolution.get("deadline", "")
+            row.cells[5].text = resolution.get("execution_date", "")
+            row.cells[6].text = resolution.get("status", "")
+            row.cells[7].text = str(resolution.get("report_count", ""))
+            for cell in row.cells:
+                run = cell.paragraphs[0].runs[0]
+                run.font.name = "Arial"
+                run.font.size = Pt(11)
+        
+        doc.add_paragraph()  # Spacer
+        
+        # --- Sanctions Table ---
         sanctions = extracted_info.get("sanctions_summary", [])
         if not sanctions:
             sanctions = [{
@@ -330,40 +352,58 @@ def fill_template_and_generate_docx(extracted_info):
                 "status": "Non appliqué"
             }]
         
-        sanctions_table_found = False
-        for table in rendered_doc.tables:
-            if len(table.rows) > 0 and len(table.columns) >= 5:
-                headers = []
-                if table.rows[0].cells:
-                    headers = [cell.text.strip() for cell in table.rows[0].cells if cell.text]
-                if headers and "NOM" in ' '.join(headers) and "MOTIF" in ' '.join(headers):
-                    sanctions_table_found = True
-                    for i, sanction in enumerate(sanctions):
-                        row_index = i + 1  # Skip header
-                        if row_index < len(table.rows):
-                            row = table.rows[row_index]
-                        else:
-                            row = table.add_row()
-                        if len(row.cells) >= 5:
-                            row.cells[0].text = sanction.get("name", "")
-                            row.cells[1].text = sanction.get("reason", "")
-                            row.cells[2].text = sanction.get("amount", "")
-                            row.cells[3].text = sanction.get("date", "")
-                            row.cells[4].text = sanction.get("status", "")
-                        else:
-                            st.warning(f"Ligne {row_index} du tableau des sanctions n'a pas assez de cellules (attendues: 5, trouvées: {len(row.cells)}).")
-                    break
-        if not sanctions_table_found:
-            st.warning("Tableau des sanctions non trouvé ou mal formé dans le modèle.")
+        p = doc.add_paragraph("RÉCAPITULATIF DES SANCTIONS")
+        run = p.runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
         
-        # Save the final document
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as final_tmp:
-            rendered_doc.save(final_tmp.name)
-            with open(final_tmp.name, "rb") as f:
+        sanctions_table = doc.add_table(rows=len(sanctions) + 1, cols=5)
+        try:
+            sanctions_table.style = "Table Grid"
+        except KeyError:
+            st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
+        
+        # Header row
+        headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
+        for j, header in enumerate(headers):
+            cell = sanctions_table.cell(0, j)
+            cell.text = header
+            run = cell.paragraphs[0].runs[0]
+            run.font.name = "Arial"
+            run.font.size = Pt(11)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        
+        # Data rows
+        for i, sanction in enumerate(sanctions):
+            row = sanctions_table.rows[i + 1]
+            row.cells[0].text = sanction.get("name", "")
+            row.cells[1].text = sanction.get("reason", "")
+            row.cells[2].text = sanction.get("amount", "")
+            row.cells[3].text = sanction.get("date", "")
+            row.cells[4].text = sanction.get("status", "")
+            for cell in row.cells:
+                run = cell.paragraphs[0].runs[0]
+                run.font.name = "Arial"
+                run.font.size = Pt(11)
+        
+        doc.add_paragraph()  # Spacer
+        
+        # --- Balance Info ---
+        p = doc.add_paragraph(f"Le solde du compte DRI Solidarité (00001-00921711101-10) est de XAF {extracted_info['balance_amount']} au {extracted_info['balance_date']}.")
+        run = p.runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(11)
+        
+        # Save the document
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            doc.save(tmp.name)
+            with open(tmp.name, "rb") as f:
                 docx_data = f.read()
-            os.unlink(final_tmp.name)
+            os.unlink(tmp.name)
         
-        os.unlink(tmp.name)
         return docx_data
     
     except Exception as e:
@@ -385,14 +425,13 @@ def main():
         """)
     
     try:
-        from docxtpl import DocxTemplate
         from docx import Document
         DOCX_AVAILABLE = True
     except ImportError:
         DOCX_AVAILABLE = False
         st.warning("""
-        ⚠️ Les bibliothèques docxtpl et python-docx ne sont pas installées.
-        Exécutez : `pip install docxtpl python-docx`
+        ⚠️ La bibliothèque python-docx n'est pas installée.
+        Exécutez : `pip install python-docx`
         """)
     
     if 'api_key' not in st.session_state:
@@ -582,7 +621,7 @@ if __name__ == "__main__":
         Si vous rencontrez des erreurs, essayez les solutions suivantes :
         1. Installez toutes les dépendances :
            ```
-           pip install streamlit transformers torch torchaudio docxtpl python-docx requests
+           pip install streamlit transformers torch torchaudio python-docx requests
            ```
         2. Pour Streamlit Cloud, assurez-vous d'avoir un fichier `requirements.txt` :
            ```
@@ -590,7 +629,6 @@ if __name__ == "__main__":
            transformers>=4.30.0
            torch>=2.0.1
            torchaudio>=2.0.2
-           docxtpl>=0.16.0
            python-docx>=0.8.11
            requests>=2.28.0
            ```
@@ -598,12 +636,6 @@ if __name__ == "__main__":
            - Sur Ubuntu : `sudo apt-get install ffmpeg`
            - Sur macOS : `brew install ffmpeg`
            - Sur Windows : Téléchargez depuis https://ffmpeg.org/download.html
-        4. Assurez-vous que le fichier de modèle 'Template_reunion (1).docx' est dans le répertoire de travail.
-        5. Vérifiez que le modèle contient les sections suivantes avec les en-têtes de tableau corrects :
-           - Tableau de présence avec les colonnes "PRÉSENCES" et "ABSENCES".
-           - Section "ORDRE DU JOUR :" suivie de paragraphes pour les éléments de l'agenda.
-           - Tableau des résolutions avec les colonnes incluant "NBR DE REPORT".
-           - Tableau des sanctions avec les colonnes incluant "NOM" et "MOTIF".
         """)
         
         st.title("Mode Secours")
