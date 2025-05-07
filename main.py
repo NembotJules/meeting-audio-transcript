@@ -217,43 +217,56 @@ def fill_template_and_generate_docx(extracted_info):
             rendered_doc = Document(tmp.name)
         
         # Populate the attendance table
+        attendance_table_found = False
         for table in rendered_doc.tables:
             if len(table.rows) > 0 and len(table.columns) == 2:
-                if "PRÉSENCES" in table.cell(0, 0).text and "ABSENCES" in table.cell(0, 1).text:
-                    row_index = 1  # Start after header
-                    for present in present_attendees:
-                        if present and present != "Non spécifié":
-                            if row_index < len(table.rows):
-                                table.cell(row_index, 0).text = present
-                            else:
-                                new_row = table.add_row()
-                                new_row.cells[0].text = present
-                            row_index += 1
-                    
-                    row_index = 1  # Reset for absents
-                    for absent in absent_attendees:
-                        if absent and absent != "Non spécifié":
-                            if row_index < len(table.rows):
-                                table.cell(row_index, 1).text = absent
-                            else:
-                                new_row = table.add_row()
-                                new_row.cells[1].text = absent
-                            row_index += 1
-                    break
+                cell_0_0 = table.cell(0, 0)
+                cell_0_1 = table.cell(0, 1)
+                if cell_0_0 and cell_0_1:
+                    cell_0_0_text = cell_0_0.text.strip() if cell_0_0.text else ""
+                    cell_0_1_text = cell_0_1.text.strip() if cell_0_1.text else ""
+                    if "PRÉSENCES" in cell_0_0_text and "ABSENCES" in cell_0_1_text:
+                        attendance_table_found = True
+                        row_index = 1  # Start after header
+                        for present in present_attendees:
+                            if present and present != "Non spécifié":
+                                if row_index < len(table.rows):
+                                    table.cell(row_index, 0).text = present
+                                else:
+                                    new_row = table.add_row()
+                                    new_row.cells[0].text = present
+                                row_index += 1
+                        
+                        row_index = 1  # Reset for absents
+                        for absent in absent_attendees:
+                            if absent and absent != "Non spécifié":
+                                if row_index < len(table.rows):
+                                    table.cell(row_index, 1).text = absent
+                                else:
+                                    new_row = table.add_row()
+                                    new_row.cells[1].text = absent
+                                row_index += 1
+                        break
+        if not attendance_table_found:
+            st.warning("Tableau de présence non trouvé ou mal formé dans le modèle.")
         
         # Populate the agenda items
         agenda_inserted = False
         for i, paragraph in enumerate(rendered_doc.paragraphs):
-            if "ORDRE DU JOUR :" in paragraph.text:
+            if paragraph.text and "ORDRE DU JOUR :" in paragraph.text:
+                # Ensure there are enough paragraphs after this one
+                if i + 1 >= len(rendered_doc.paragraphs):
+                    rendered_doc.add_paragraph("Placeholder")  # Add a placeholder paragraph
                 for j, item in enumerate(agenda_list):
                     if j == 0:
                         # Replace the first agenda item paragraph
                         rendered_doc.paragraphs[i + 1].text = item
                     else:
                         # Insert new paragraphs for additional items
-                        new_paragraph = rendered_doc.paragraphs[i + 1]._element
-                        new_p = new_paragraph.getparent().insert(new_paragraph.getparent().index(new_paragraph) + j, new_paragraph.__class__())
-                        new_p.text = item
+                        if i + j + 1 < len(rendered_doc.paragraphs):
+                            rendered_doc.paragraphs[i + j + 1].text = item
+                        else:
+                            rendered_doc.add_paragraph(item)
                 agenda_inserted = True
                 break
         if not agenda_inserted:
@@ -273,10 +286,18 @@ def fill_template_and_generate_docx(extracted_info):
                 "report_count": "00"
             }]
         
+        resolutions_table_found = False
         for table in rendered_doc.tables:
             if len(table.rows) > 0 and len(table.columns) >= 8:
-                cell_text = ' '.join([cell.text for row in table.rows for cell in row.cells])
+                # Safely collect cell texts
+                cell_texts = []
+                for row in table.rows:
+                    for cell in row.cells:
+                        if cell.text:
+                            cell_texts.append(cell.text.strip())
+                cell_text = ' '.join(cell_texts)
                 if "NBR DE REPORT" in cell_text:
+                    resolutions_table_found = True
                     for i, resolution in enumerate(resolutions):
                         row_index = i + 1  # Skip header
                         if row_index < len(table.rows):
@@ -292,7 +313,11 @@ def fill_template_and_generate_docx(extracted_info):
                             row.cells[5].text = resolution.get("execution_date", "")
                             row.cells[6].text = resolution.get("status", "")
                             row.cells[7].text = str(resolution.get("report_count", ""))
+                        else:
+                            st.warning(f"Ligne {row_index} du tableau des résolutions n'a pas assez de cellules (attendues: 8, trouvées: {len(row.cells)}).")
                     break
+        if not resolutions_table_found:
+            st.warning("Tableau des résolutions non trouvé ou mal formé dans le modèle.")
         
         # Populate the sanctions table
         sanctions = extracted_info.get("sanctions_summary", [])
@@ -305,10 +330,14 @@ def fill_template_and_generate_docx(extracted_info):
                 "status": "Non appliqué"
             }]
         
+        sanctions_table_found = False
         for table in rendered_doc.tables:
             if len(table.rows) > 0 and len(table.columns) >= 5:
-                headers = [cell.text.strip() for cell in table.rows[0].cells]
-                if "NOM" in ' '.join(headers) and "MOTIF" in ' '.join(headers):
+                headers = []
+                if table.rows[0].cells:
+                    headers = [cell.text.strip() for cell in table.rows[0].cells if cell.text]
+                if headers and "NOM" in ' '.join(headers) and "MOTIF" in ' '.join(headers):
+                    sanctions_table_found = True
                     for i, sanction in enumerate(sanctions):
                         row_index = i + 1  # Skip header
                         if row_index < len(table.rows):
@@ -321,7 +350,11 @@ def fill_template_and_generate_docx(extracted_info):
                             row.cells[2].text = sanction.get("amount", "")
                             row.cells[3].text = sanction.get("date", "")
                             row.cells[4].text = sanction.get("status", "")
+                        else:
+                            st.warning(f"Ligne {row_index} du tableau des sanctions n'a pas assez de cellules (attendues: 5, trouvées: {len(row.cells)}).")
                     break
+        if not sanctions_table_found:
+            st.warning("Tableau des sanctions non trouvé ou mal formé dans le modèle.")
         
         # Save the final document
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as final_tmp:
