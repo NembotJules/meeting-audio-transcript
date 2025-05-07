@@ -235,7 +235,11 @@ def fill_template_and_generate_docx(extracted_info):
                 "report_count": "00"
             }]
         table = rendered_doc.add_table(rows=len(resolutions) + 1, cols=8)
-        table.style = "Table Grid"
+        try:
+            table.style = "Table Grid"
+        except KeyError:
+            st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
+            table.style = None  # Fallback to default style
         headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
         for j, header in enumerate(headers):
             cell = table.cell(0, j)
@@ -266,7 +270,11 @@ def fill_template_and_generate_docx(extracted_info):
                 "status": "Non appliqué"
             }]
         table = rendered_doc.add_table(rows=len(sanctions) + 1, cols=5)
-        table.style = "Table Grid"
+        try:
+            table.style = "Table Grid"
+        except KeyError:
+            st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
+            table.style = None  # Fallback to default style
         headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
         for j, header in enumerate(headers):
             cell = table.cell(0, j)
@@ -532,7 +540,7 @@ if __name__ == "__main__":
         """)
         
         st.title("Mode Secours")
-        st.warning("Application en mode limité. La transcription audio n'est pas disponible.")
+        st.warning("Application en mode limité. La transcription audio n'est not disponible.")
         st.header("Détails de la Réunion")
         meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
         meeting_date = st.date_input("Date de la Réunion", datetime.now())
