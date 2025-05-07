@@ -5,6 +5,8 @@ from datetime import datetime
 import requests
 from transformers import pipeline
 from docxtpl import DocxTemplate
+from docx import Document
+from docx.shared import RGBColor
 import warnings
 import torch
 import torchaudio
@@ -155,7 +157,7 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, start_t
     }
 
 def fill_template_and_generate_docx(extracted_info):
-    """Fill the Word template with extracted info using all placeholders"""
+    """Fill the Word template with extracted info and append missing sections"""
     try:
         # Load the template
         template_path = "Template_reunion (1).docx"
@@ -193,7 +195,33 @@ def fill_template_and_generate_docx(extracted_info):
         agenda_list = extracted_info["agenda_items"].split("\n") if extracted_info["agenda_items"] else ["Non spécifié"]
         agenda_list = [item.strip() for item in agenda_list if item.strip()]
         
-        # Prepare resolutions and sanctions
+        # Prepare the context for the template
+        context = {
+            "date": extracted_info["date"],
+            "start_time": extracted_info["start_time"],
+            "end_time": extracted_info["end_time"],
+            "agenda": agenda_list,
+            "account_balance": extracted_info["balance_amount"],
+            "balance_date": extracted_info["balance_date"],
+            **attendee_context  # Add attendee placeholders
+        }
+        
+        # Log the context for debugging
+        st.write("Contexte pour le modèle :", context)
+        
+        # Render the template with the context
+        doc.render(context)
+        
+        # Save the rendered document to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            doc.save(tmp.name)
+            # Load the rendered document to append missing sections
+            rendered_doc = Document(tmp.name)
+        
+        # Append RÉCAPITULATIF DES RÉSOLUTIONS section
+        heading_resolutions = rendered_doc.add_heading("RÉCAPITULATIF DES RÉSOLUTIONS", level=3)
+        for run in heading_resolutions.runs:
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
         resolutions = extracted_info.get("resolutions_summary", [])
         if not resolutions:
             resolutions = [{
@@ -206,7 +234,28 @@ def fill_template_and_generate_docx(extracted_info):
                 "status": "En cours",
                 "report_count": "00"
             }]
+        table = rendered_doc.add_table(rows=len(resolutions) + 1, cols=8)
+        table.style = "Table Grid"
+        headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
+        for j, header in enumerate(headers):
+            cell = table.cell(0, j)
+            cell.text = header
+            for run in cell.paragraphs[0].runs:
+                run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        for row_idx, resolution in enumerate(resolutions, 1):
+            table.cell(row_idx, 0).text = resolution.get("date", "Non spécifié")
+            table.cell(row_idx, 1).text = resolution.get("dossier", "Non spécifié")
+            table.cell(row_idx, 2).text = resolution.get("resolution", "Non spécifié")
+            table.cell(row_idx, 3).text = resolution.get("responsible", "Non spécifié")
+            table.cell(row_idx, 4).text = resolution.get("deadline", "Non spécifié")
+            table.cell(row_idx, 5).text = resolution.get("execution_date", "")
+            table.cell(row_idx, 6).text = resolution.get("status", "En cours")
+            table.cell(row_idx, 7).text = resolution.get("report_count", "00")
         
+        # Append RÉCAPITULATIF DES SANCTIONS section
+        heading_sanctions = rendered_doc.add_heading("RÉCAPITULATIF DES SANCTIONS", level=3)
+        for run in heading_sanctions.runs:
+            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
         sanctions = extracted_info.get("sanctions_summary", [])
         if not sanctions:
             sanctions = [{
@@ -216,29 +265,34 @@ def fill_template_and_generate_docx(extracted_info):
                 "date": extracted_info["date"],
                 "status": "Non appliqué"
             }]
+        table = rendered_doc.add_table(rows=len(sanctions) + 1, cols=5)
+        table.style = "Table Grid"
+        headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
+        for j, header in enumerate(headers):
+            cell = table.cell(0, j)
+            cell.text = header
+            for run in cell.paragraphs[0].runs:
+                run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        for row_idx, sanction in enumerate(sanctions, 1):
+            table.cell(row_idx, 0).text = sanction.get("name", "Aucun")
+            table.cell(row_idx, 1).text = sanction.get("reason", "Aucune sanction mentionnée")
+            table.cell(row_idx, 2).text = sanction.get("amount", "0")
+            table.cell(row_idx, 3).text = sanction.get("date", extracted_info["date"])
+            table.cell(row_idx, 4).text = sanction.get("status", "Non appliqué")
         
-        # Prepare the context for the template
-        context = {
-            "date": extracted_info["date"],
-            "start_time": extracted_info["start_time"],
-            "end_time": extracted_info["end_time"],
-            "agenda": agenda_list,
-            "resolutions": resolutions,
-            "sanctions": sanctions,
-            "account_balance": extracted_info["balance_amount"],
-            "balance_date": extracted_info["balance_date"],
-            **attendee_context  # Add attendee placeholders
-        }
+        # Add spacing after the sanctions table
+        rendered_doc.add_paragraph("")  # Blank paragraph for spacing
+        rendered_doc.add_paragraph("")  # Additional blank paragraph for more spacing
         
-        # Render the template with the context
-        doc.render(context)
-        
-        # Save the rendered document to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-            doc.save(tmp.name)
-            with open(tmp.name, "rb") as f:
+        # Save the final document to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as final_tmp:
+            rendered_doc.save(final_tmp.name)
+            with open(final_tmp.name, "rb") as f:
                 docx_data = f.read()
-            os.unlink(tmp.name)
+            os.unlink(final_tmp.name)
+        
+        # Clean up the initial temporary file
+        os.unlink(tmp.name)
         
         return docx_data
     
@@ -262,12 +316,13 @@ def main():
     
     try:
         from docxtpl import DocxTemplate
+        from docx import Document
         DOCX_AVAILABLE = True
     except ImportError:
         DOCX_AVAILABLE = False
         st.warning("""
-        ⚠️ La bibliothèque docxtpl n'est pas installée.
-        Exécutez : `pip install docxtpl`
+        ⚠️ Les bibliothèques docxtpl et python-docx ne sont pas installées.
+        Exécutez : `pip install docxtpl python-docx`
         """)
     
     if 'api_key' not in st.session_state:
@@ -457,7 +512,7 @@ if __name__ == "__main__":
         Si vous rencontrez des erreurs, essayez les solutions suivantes :
         1. Installez toutes les dépendances :
            ```
-           pip install streamlit transformers torch torchaudio docxtpl requests
+           pip install streamlit transformers torch torchaudio docxtpl python-docx requests
            ```
         2. Pour Streamlit Cloud, assurez-vous d'avoir un fichier `requirements.txt` :
            ```
@@ -466,6 +521,7 @@ if __name__ == "__main__":
            torch>=2.0.1
            torchaudio>=2.0.2
            docxtpl>=0.16.0
+           python-docx>=0.8.11
            requests>=2.28.0
            ```
         3. Installez ffmpeg pour les fichiers .m4a :
