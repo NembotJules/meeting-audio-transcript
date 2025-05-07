@@ -167,7 +167,7 @@ def main():
         st.session_state.agenda[i] = st.text_input(f"Point {i+1}", st.session_state.agenda[i], key=f"agenda_{i}")
     if st.button("Ajouter un point"):
         st.session_state.agenda.append("")
-        st.experimental_rerun()
+        return  # stop to trigger rerun with updated state
     agenda_items = [i for i in st.session_state.agenda if i.strip()]
 
     balance_amount = st.text_input("Solde (XAF)", "682040")
