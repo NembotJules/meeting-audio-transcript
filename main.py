@@ -5,6 +5,8 @@ from datetime import datetime
 import requests
 from transformers import pipeline
 from docxtpl import DocxTemplate
+from docx import Document
+from docx.shared import RGBColor
 import warnings
 import torch
 import torchaudio
@@ -121,7 +123,7 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, start_t
         "resolutions_summary": [
             {
                 "date": date,
-                "dossier": "Planification Projet",  # Specific dossier name, not meeting title
+                "dossier": "Planification Projet",
                 "resolution": "Non spécifié",
                 "responsible": "Non spécifié",
                 "deadline": "Non spécifié",
@@ -131,7 +133,7 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, start_t
             },
             {
                 "date": date,
-                "dossier": "Budget Q2",  # Another specific dossier name
+                "dossier": "Budget Q2",
                 "resolution": "Non spécifié",
                 "responsible": "Non spécifié",
                 "deadline": "Non spécifié",
@@ -154,8 +156,16 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, start_t
         "transcription": transcription
     }
 
+def to_roman(num):
+    """Convert an integer to a Roman numeral."""
+    roman_numerals = {
+        1: "I", 2: "II", 3: "III", 4: "IV", 5: "V",
+        6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"
+    }
+    return roman_numerals.get(num, str(num))
+
 def fill_template_and_generate_docx(extracted_info):
-    """Fill the Word template with extracted info using all placeholders"""
+    """Fill the Word template with extracted info using a hybrid approach"""
     try:
         # Load the template
         template_path = "Template_reunion (1).docx"
@@ -179,21 +189,77 @@ def fill_template_and_generate_docx(extracted_info):
                     absents = part.replace("Absents :", "").strip()
                     absent_attendees = [name.strip() for name in absents.split(",") if name.strip()]
         else:
-            # Assume the entire string is the list of presents
             present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Non spécifié" else ["Non spécifié"]
-        
-        # Create attendee placeholders (e.g., attendee_1_name, attendee_2_name, absentee_1_name, etc.)
-        attendee_context = {}
-        for i, name in enumerate(present_attendees, 1):
-            attendee_context[f"attendee_{i}_name"] = name
-        for i, name in enumerate(absent_attendees, 1):
-            attendee_context[f"absentee_{i}_name"] = name
         
         # Prepare agenda items as a list
         agenda_list = extracted_info["agenda_items"].split("\n") if extracted_info["agenda_items"] else ["Non spécifié"]
-        agenda_list = [item.strip() for item in agenda_list if item.strip()]
+        agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip()]
         
-        # Prepare resolutions and sanctions
+        # Prepare the context for docxtpl (non-table placeholders only)
+        context = {
+            "date": extracted_info["date"],
+            "start_time": extracted_info["start_time"],
+            "end_time": extracted_info["end_time"],
+            "account_balance": extracted_info["balance_amount"],
+            "balance_date": extracted_info["balance_date"],
+        }
+        
+        # Log the context for debugging
+        st.write("Contexte pour le modèle (docxtpl) :", context)
+        
+        # Render the template with docxtpl (for non-table placeholders)
+        doc.render(context)
+        
+        # Save the rendered document to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            doc.save(tmp.name)
+            # Load the rendered document with python-docx to populate tables
+            rendered_doc = Document(tmp.name)
+        
+        # Populate the attendance table
+        for table in rendered_doc.tables:
+            if len(table.rows) > 0 and len(table.columns) == 2:
+                if "PRÉSENCES" in table.cell(0, 0).text and "ABSENCES" in table.cell(0, 1).text:
+                    row_index = 1  # Start after header
+                    for present in present_attendees:
+                        if present and present != "Non spécifié":
+                            if row_index < len(table.rows):
+                                table.cell(row_index, 0).text = present
+                            else:
+                                new_row = table.add_row()
+                                new_row.cells[0].text = present
+                            row_index += 1
+                    
+                    row_index = 1  # Reset for absents
+                    for absent in absent_attendees:
+                        if absent and absent != "Non spécifié":
+                            if row_index < len(table.rows):
+                                table.cell(row_index, 1).text = absent
+                            else:
+                                new_row = table.add_row()
+                                new_row.cells[1].text = absent
+                            row_index += 1
+                    break
+        
+        # Populate the agenda items
+        agenda_inserted = False
+        for i, paragraph in enumerate(rendered_doc.paragraphs):
+            if "ORDRE DU JOUR :" in paragraph.text:
+                for j, item in enumerate(agenda_list):
+                    if j == 0:
+                        # Replace the first agenda item paragraph
+                        rendered_doc.paragraphs[i + 1].text = item
+                    else:
+                        # Insert new paragraphs for additional items
+                        new_paragraph = rendered_doc.paragraphs[i + 1]._element
+                        new_p = new_paragraph.getparent().insert(new_paragraph.getparent().index(new_paragraph) + j, new_paragraph.__class__())
+                        new_p.text = item
+                agenda_inserted = True
+                break
+        if not agenda_inserted:
+            st.warning("Section 'ORDRE DU JOUR :' non trouvée dans le modèle.")
+        
+        # Populate the resolutions table
         resolutions = extracted_info.get("resolutions_summary", [])
         if not resolutions:
             resolutions = [{
@@ -207,6 +273,28 @@ def fill_template_and_generate_docx(extracted_info):
                 "report_count": "00"
             }]
         
+        for table in rendered_doc.tables:
+            if len(table.rows) > 0 and len(table.columns) >= 8:
+                cell_text = ' '.join([cell.text for row in table.rows for cell in row.cells])
+                if "NBR DE REPORT" in cell_text:
+                    for i, resolution in enumerate(resolutions):
+                        row_index = i + 1  # Skip header
+                        if row_index < len(table.rows):
+                            row = table.rows[row_index]
+                        else:
+                            row = table.add_row()
+                        if len(row.cells) >= 8:
+                            row.cells[0].text = resolution.get("date", "")
+                            row.cells[1].text = resolution.get("dossier", "")
+                            row.cells[2].text = resolution.get("resolution", "")
+                            row.cells[3].text = resolution.get("responsible", "")
+                            row.cells[4].text = resolution.get("deadline", "")
+                            row.cells[5].text = resolution.get("execution_date", "")
+                            row.cells[6].text = resolution.get("status", "")
+                            row.cells[7].text = str(resolution.get("report_count", ""))
+                    break
+        
+        # Populate the sanctions table
         sanctions = extracted_info.get("sanctions_summary", [])
         if not sanctions:
             sanctions = [{
@@ -217,32 +305,32 @@ def fill_template_and_generate_docx(extracted_info):
                 "status": "Non appliqué"
             }]
         
-        # Prepare the context for the template
-        context = {
-            "date": extracted_info["date"],
-            "start_time": extracted_info["start_time"],
-            "end_time": extracted_info["end_time"],
-            "agenda": agenda_list,
-            "resolutions": resolutions,
-            "sanctions": sanctions,
-            "account_balance": extracted_info["balance_amount"],
-            "balance_date": extracted_info["balance_date"],
-            **attendee_context  # Add attendee placeholders
-        }
+        for table in rendered_doc.tables:
+            if len(table.rows) > 0 and len(table.columns) >= 5:
+                headers = [cell.text.strip() for cell in table.rows[0].cells]
+                if "NOM" in ' '.join(headers) and "MOTIF" in ' '.join(headers):
+                    for i, sanction in enumerate(sanctions):
+                        row_index = i + 1  # Skip header
+                        if row_index < len(table.rows):
+                            row = table.rows[row_index]
+                        else:
+                            row = table.add_row()
+                        if len(row.cells) >= 5:
+                            row.cells[0].text = sanction.get("name", "")
+                            row.cells[1].text = sanction.get("reason", "")
+                            row.cells[2].text = sanction.get("amount", "")
+                            row.cells[3].text = sanction.get("date", "")
+                            row.cells[4].text = sanction.get("status", "")
+                    break
         
-        # Log the context for debugging
-        st.write("Contexte pour le modèle :", context)
-        
-        # Render the template with the context
-        doc.render(context)
-        
-        # Save the rendered document to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-            doc.save(tmp.name)
-            with open(tmp.name, "rb") as f:
+        # Save the final document
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as final_tmp:
+            rendered_doc.save(final_tmp.name)
+            with open(final_tmp.name, "rb") as f:
                 docx_data = f.read()
-            os.unlink(tmp.name)
+            os.unlink(final_tmp.name)
         
+        os.unlink(tmp.name)
         return docx_data
     
     except Exception as e:
@@ -265,12 +353,13 @@ def main():
     
     try:
         from docxtpl import DocxTemplate
+        from docx import Document
         DOCX_AVAILABLE = True
     except ImportError:
         DOCX_AVAILABLE = False
         st.warning("""
-        ⚠️ La bibliothèque docxtpl n'est pas installée.
-        Exécutez : `pip install docxtpl`
+        ⚠️ Les bibliothèques docxtpl et python-docx ne sont pas installées.
+        Exécutez : `pip install docxtpl python-docx`
         """)
     
     if 'api_key' not in st.session_state:
@@ -460,7 +549,7 @@ if __name__ == "__main__":
         Si vous rencontrez des erreurs, essayez les solutions suivantes :
         1. Installez toutes les dépendances :
            ```
-           pip install streamlit transformers torch torchaudio docxtpl requests
+           pip install streamlit transformers torch torchaudio docxtpl python-docx requests
            ```
         2. Pour Streamlit Cloud, assurez-vous d'avoir un fichier `requirements.txt` :
            ```
@@ -469,6 +558,7 @@ if __name__ == "__main__":
            torch>=2.0.1
            torchaudio>=2.0.2
            docxtpl>=0.16.0
+           python-docx>=0.8.11
            requests>=2.28.0
            ```
         3. Installez ffmpeg pour les fichiers .m4a :
@@ -476,8 +566,11 @@ if __name__ == "__main__":
            - Sur macOS : `brew install ffmpeg`
            - Sur Windows : Téléchargez depuis https://ffmpeg.org/download.html
         4. Assurez-vous que le fichier de modèle 'Template_reunion (1).docx' est dans le répertoire de travail.
-        5. Mettez à jour le modèle pour inclure les boucles pour les résolutions et les sanctions :
-           - Ajoutez `{% for resolution in resolutions %}` et `{% for sanction in sanctions %}` dans les sections appropriées du modèle.
+        5. Vérifiez que le modèle contient les sections suivantes avec les en-têtes de tableau corrects :
+           - Tableau de présence avec les colonnes "PRÉSENCES" et "ABSENCES".
+           - Section "ORDRE DU JOUR :" suivie de paragraphes pour les éléments de l'agenda.
+           - Tableau des résolutions avec les colonnes incluant "NBR DE REPORT".
+           - Tableau des sanctions avec les colonnes incluant "NOM" et "MOTIF".
         """)
         
         st.title("Mode Secours")
