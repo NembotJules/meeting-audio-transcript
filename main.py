@@ -220,6 +220,21 @@ def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), 
     
     return table
 
+def add_text_in_box(doc, text, bg_color=(192, 192, 192)):
+    """Add text inside a single-cell table with a background color to simulate a box."""
+    table = doc.add_table(rows=1, cols=1)
+    table.style = "Table Grid"
+    cell = table.cell(0, 0)
+    cell.text = text
+    paragraph = cell.paragraphs[0]
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.runs[0]
+    run.font.name = "Arial"
+    run.font.size = Pt(12)
+    run.font.bold = True
+    set_cell_background(cell, bg_color)
+    return table
+
 def fill_template_and_generate_docx(extracted_info):
     """Build the Word document from scratch using python-docx"""
     try:
@@ -247,15 +262,14 @@ def fill_template_and_generate_docx(extracted_info):
         agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip()]
         
         # --- Header Section ---
-        add_styled_paragraph(
+        # Add "Direction Recherches et Investissements" in a gray box
+        add_text_in_box(
             doc,
             "Direction Recherches et Investissements",
-            font_name="Arial",
-            font_size=12,
-            bold=True,
-            alignment=WD_ALIGN_PARAGRAPH.CENTER
+            bg_color=(192, 192, 192)  # Gray background
         )
         
+        # Add "COMPTE RENDU RÉUNION HEBDOMADAIRE" below the box
         add_styled_paragraph(
             doc,
             "COMPTE RENDU RÉUNION HEBDOMADAIRE",
@@ -278,24 +292,34 @@ def fill_template_and_generate_docx(extracted_info):
         
         doc.add_paragraph()  # Spacer
         
-        # --- Start and End Time ---
+        # --- Start and End Time (now centered) ---
         add_styled_paragraph(
             doc,
             f"Heure début : {extracted_info['start_time']}",
             font_name="Arial",
-            font_size=11
+            font_size=11,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
         add_styled_paragraph(
             doc,
             f"Heure de fin : {extracted_info['end_time']}",
             font_name="Arial",
-            font_size=11
+            font_size=11,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
         doc.add_paragraph()  # Spacer
         
         # --- Attendance Table ---
+        add_styled_paragraph(
+            doc,
+            "----------",
+            font_name="Arial",
+            font_size=11,
+            alignment=WD_ALIGN_PARAGRAPH.LEFT
+        )
+        
         add_styled_paragraph(
             doc,
             "LISTE DE PRÉSENCE / ABSENCE :",
@@ -327,6 +351,14 @@ def fill_template_and_generate_docx(extracted_info):
         doc.add_paragraph()  # Spacer
         
         # --- Agenda Items ---
+        add_styled_paragraph(
+            doc,
+            "----------",
+            font_name="Arial",
+            font_size=11,
+            alignment=WD_ALIGN_PARAGRAPH.LEFT
+        )
+        
         add_styled_paragraph(
             doc,
             "ORDRE DU JOUR :",
