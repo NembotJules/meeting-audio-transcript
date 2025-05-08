@@ -51,7 +51,7 @@ def transcribe_audio(audio_file, file_extension, model_size="base"):
         st.error(f"Erreur lors de la transcription audio: {e}")
         return f"Erreur lors de la transcription audio: {e}"
 
-def extract_info(transcription, meeting_title, date, attendees, api_key):
+def extract_info(transcription, meeting_title, date, attendees, absentees, api_key):
     """Extract key information from the transcription using Deepseek API"""
     prompt = f"""
     Vous êtes un expert en rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez et structurez les informations suivantes pour remplir un modèle de compte rendu de réunion. Retournez les informations sous forme de JSON avec les clés suivantes :
@@ -70,6 +70,7 @@ def extract_info(transcription, meeting_title, date, attendees, api_key):
     - Titre : {meeting_title}
     - Date par défaut : {date}
     - Participants fournis : {attendees}
+    - Absents fournis : {absentees}
     
     Transcription :
     {transcription}
@@ -108,20 +109,23 @@ def extract_info(transcription, meeting_title, date, attendees, api_key):
         st.error(f"Erreur lors de l'extraction des informations : {e}")
         return None
 
-def extract_info_fallback(transcription, meeting_title, date, attendees, start_time="Non spécifié", end_time="Non spécifié", agenda_items=None, balance_amount="Non spécifié", balance_date=None):
+def extract_info_fallback(transcription, meeting_title, date, attendees, absentees, start_time="Non spécifié", end_time="Non spécifié", agenda_items=None, balance_amount="Non spécifié", balance_date=None):
     """Fallback mode for structuring information if Deepseek API fails"""
     if agenda_items is None:
         agenda_items = ["Non spécifié dans la transcription."]
     if balance_date is None:
         balance_date = date
     
-    agenda_text = "\n".join([f"{idx}. {item}" for idx, item in enumerate(agenda_items, 1)])
+    agenda_text = "\n".join([f"{to_roman(idx)}. {item}" for idx, item in enumerate(agenda_items, 1)])
+    
+    # Combine attendees and absentees into presence_list
+    presence_list = f"Présents : {attendees if attendees else 'Non spécifié'}\nAbsents : {absentees if absentees else 'Non spécifié'}"
     
     return {
         "date": date,
         "start_time": start_time,
         "end_time": end_time,
-        "presence_list": attendees if attendees else "Non spécifié",
+        "presence_list": presence_list,
         "agenda_items": agenda_text,
         "resolutions_summary": [
             {
@@ -215,16 +219,16 @@ def add_styled_paragraph(doc, text, font_name="Century", font_size=12, bold=Fals
         run.font.color.rgb = color
     return p
 
-def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), header_text_color=(255, 255, 255), alt_row_bg_color=(192, 192, 192), column_widths=None):
-    """Add a styled table to the document with background colors and custom widths."""
+def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), header_text_color=(255, 255, 255), alt_row_bg_color=(192, 192, 192), column_widths=None, table_width=6.5):
+    """Add a styled table to the document with background colors, custom widths, and adjustable table width."""
     table = doc.add_table(rows=rows, cols=cols)
     try:
         table.style = "Table Grid"
     except KeyError:
         st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
     
-    # Set table width to make it wider (e.g., 6.5 inches to fit standard page width better)
-    set_table_width(table, 6.5)
+    # Set table width (default 6.5 inches, can be overridden)
+    set_table_width(table, table_width)
     
     # Set column widths if provided
     if column_widths:
@@ -277,7 +281,7 @@ def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14, box_width
     set_cell_margins(cell, top=0.2, bottom=0.2, left=0.3, right=0.3)
     return table
 
-def fill_template_and_generate_docx(extracted_info):
+def fill_template_and_generate_docx(extracted_info, rapporteur, president):
     """Build the Word document from scratch using python-docx"""
     try:
         # Create a new document
@@ -357,7 +361,24 @@ def fill_template_and_generate_docx(extracted_info):
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        doc.add_paragraph()  # Spacer after Heure de fin
+        # --- Rapporteur and President (centered) ---
+        add_styled_paragraph(
+            doc,
+            f"Rapporteur : {rapporteur if rapporteur else 'Non spécifié'}",
+            font_name="Century",
+            font_size=12,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
+        )
+        
+        add_styled_paragraph(
+            doc,
+            f"Président de Réunion : {president if president else 'Non spécifié'}",
+            font_name="Century",
+            font_size=12,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
+        )
+        
+        doc.add_paragraph()  # Spacer after roles
         
         # --- Attendance Table ---
         add_styled_paragraph(
@@ -388,7 +409,8 @@ def fill_template_and_generate_docx(extracted_info):
             header_bg_color=(0, 0, 0),  # Black background
             header_text_color=(255, 255, 255),  # White text
             alt_row_bg_color=(192, 192, 192),  # Gray for alternating rows
-            column_widths=attendance_column_widths
+            column_widths=attendance_column_widths,
+            table_width=6.5
         )
         
         doc.add_paragraph()  # Spacer
@@ -450,8 +472,8 @@ def fill_template_and_generate_docx(extracted_info):
             ]
             resolutions_data.append(row_data)
         
-        # Define column widths for the resolutions table (total width = 6.5 inches)
-        resolutions_column_widths = [0.8, 1.0, 1.5, 0.7, 1.0, 0.8, 0.7, 0.8]
+        # Define column widths for the resolutions table (total width = 7.5 inches, wider)
+        resolutions_column_widths = [0.9, 1.2, 1.8, 0.8, 1.2, 0.9, 0.8, 0.9]  # Adjusted proportionally for 7.5 inches
         add_styled_table(
             doc,
             rows=len(resolutions) + 1,
@@ -461,7 +483,8 @@ def fill_template_and_generate_docx(extracted_info):
             header_bg_color=(0, 0, 0),  # Black background
             header_text_color=(255, 255, 255),  # White text
             alt_row_bg_color=(192, 192, 192),  # Gray for alternating rows
-            column_widths=resolutions_column_widths
+            column_widths=resolutions_column_widths,
+            table_width=7.5  # Wider table
         )
         
         doc.add_paragraph()  # Spacer
@@ -498,8 +521,8 @@ def fill_template_and_generate_docx(extracted_info):
             ]
             sanctions_data.append(row_data)
         
-        # Define column widths for the sanctions table (total width = 6.5 inches)
-        sanctions_column_widths = [1.3, 1.5, 1.2, 1.0, 1.5]
+        # Define column widths for the sanctions table (total width = 7.5 inches, wider)
+        sanctions_column_widths = [1.5, 1.8, 1.4, 1.2, 1.6]  # Adjusted proportionally for 7.5 inches
         add_styled_table(
             doc,
             rows=len(sanctions) + 1,
@@ -509,7 +532,8 @@ def fill_template_and_generate_docx(extracted_info):
             header_bg_color=(0, 0, 0),  # Black background
             header_text_color=(255, 255, 255),  # White text
             alt_row_bg_color=(192, 192, 192),  # Gray for alternating rows
-            column_widths=sanctions_column_widths
+            column_widths=sanctions_column_widths,
+            table_width=7.5  # Wider table
         )
         
         doc.add_paragraph()  # Spacer
@@ -604,7 +628,10 @@ def main():
         meeting_date = st.date_input("Date de la Réunion", datetime.now())
         start_time = st.text_input("Heure de début (format HHhMMmin, ex: 07h00min)", value="07h00min")
         end_time = st.text_input("Heure de fin (format HHhMMmin, ex: 10h34min)", value="10h34min")
-        attendees = st.text_area("Participants (séparés par des virgules)")
+        attendees = st.text_area("Participants Présents (séparés par des virgules)")
+        absentees = st.text_area("Participants Absents (séparés par des virgules)")
+        rapporteur = st.text_input("Rapporteur")
+        president = st.text_input("Président de Réunion")
         
         st.subheader("Ordre du Jour")
         agenda_items_container = st.container()
@@ -616,7 +643,8 @@ def main():
             for i, item in enumerate(st.session_state.agenda_items):
                 cols = st.columns([0.9, 0.1])
                 with cols[0]:
-                    new_item = st.text_input(f"Point {i+1}", item, key=f"agenda_item_{i}")
+                    # Use Roman numerals in the label
+                    new_item = st.text_input(f"Point {to_roman(i+1)}", item, key=f"agenda_item_{i}")
                 with cols[1]:
                     if st.button("𝗫", key=f"del_agenda_{i}"):
                         pass
@@ -670,6 +698,7 @@ def main():
                             meeting_title,
                             meeting_date.strftime("%d/%m/%Y"),
                             attendees,
+                            absentees,
                             st.session_state.api_key
                         )
                         if not extracted_info:
@@ -678,6 +707,7 @@ def main():
                                 meeting_title,
                                 meeting_date.strftime("%d/%m/%Y"),
                                 attendees,
+                                absentees,
                                 start_time,
                                 end_time,
                                 agenda_items,
@@ -688,7 +718,7 @@ def main():
                             # Override with user inputs
                             extracted_info["start_time"] = start_time
                             extracted_info["end_time"] = end_time
-                            extracted_info["agenda_items"] = "\n".join([f"{idx}. {item}" for idx, item in enumerate(agenda_items, 1)]) if agenda_items else "Non spécifié"
+                            extracted_info["agenda_items"] = "\n".join([f"{to_roman(idx)}. {item}" for idx, item in enumerate(agenda_items, 1)]) if agenda_items else "Non spécifié"
                             extracted_info["balance_amount"] = balance_amount
                             extracted_info["balance_date"] = balance_date.strftime("%d/%m/%Y")
                 else:
@@ -698,6 +728,7 @@ def main():
                         meeting_title,
                         meeting_date.strftime("%d/%m/%Y"),
                         attendees,
+                        absentees,
                         start_time,
                         end_time,
                         agenda_items,
@@ -711,7 +742,7 @@ def main():
                     st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
                     
                     with st.spinner("Génération du document Word..."):
-                        docx_data = fill_template_and_generate_docx(extracted_info)
+                        docx_data = fill_template_and_generate_docx(extracted_info, rapporteur, president)
                     
                     if docx_data:
                         st.download_button(
@@ -726,7 +757,7 @@ def main():
             st.text_area("Aperçu:", json.dumps(st.session_state.extracted_info, indent=2, ensure_ascii=False), height=300)
             
             with st.spinner("Génération du document Word..."):
-                docx_data = fill_template_and_generate_docx(st.session_state.extracted_info)
+                docx_data = fill_template_and_generate_docx(st.session_state.extracted_info, rapporteur, president)
             
             if docx_data:
                 st.download_button(
@@ -770,7 +801,10 @@ if __name__ == "__main__":
         meeting_date = st.date_input("Date de la Réunion", datetime.now())
         start_time = st.text_input("Heure de début (format HHhMMmin, ex: 07h00min)", value="07h00min")
         end_time = st.text_input("Heure de fin (format HHhMMmin, ex: 10h34min)", value="10h34min")
-        attendees = st.text_area("Participants (séparés par des virgules)")
+        attendees = st.text_area("Participants Présents (séparés par des virgules)")
+        absentees = st.text_area("Participants Absents (séparés par des virgules)")
+        rapporteur = st.text_input("Rapporteur")
+        president = st.text_input("Président de Réunion")
         balance_amount = st.text_input("Solde du compte DRI Solidarité (en XAF, ex: 682040)", value="682040")
         balance_date = st.date_input("Date du solde", value=meeting_date)
         transcription = st.text_area("Transcription (saisie manuelle)", height=300)
@@ -781,6 +815,7 @@ if __name__ == "__main__":
                 meeting_title,
                 meeting_date.strftime("%d/%m/%Y"),
                 attendees,
+                absentees,
                 start_time=start_time,
                 end_time=end_time,
                 balance_amount=balance_amount,
@@ -790,7 +825,7 @@ if __name__ == "__main__":
             st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
             
             try:
-                docx_data = fill_template_and_generate_docx(extracted_info)
+                docx_data = fill_template_and_generate_docx(extracted_info, rapporteur, president)
                 if docx_data:
                     st.download_button(
                         label="Télécharger les Notes de Réunion",
