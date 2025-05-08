@@ -7,6 +7,8 @@ from transformers import pipeline
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 import warnings
 import torch
 import torchaudio
@@ -164,6 +166,12 @@ def to_roman(num):
     }
     return roman_numerals.get(num, str(num))
 
+def set_cell_background(cell, rgb_color):
+    """Set the background color of a table cell using RGB values."""
+    shading_elm = OxmlElement('w:shd')
+    shading_elm.set(qn('w:fill'), f"{rgb_color[0]:02X}{rgb_color[1]:02X}{rgb_color[2]:02X}")
+    cell._element.get_or_add_tcPr().append(shading_elm)
+
 def add_styled_paragraph(doc, text, font_name="Arial", font_size=11, bold=False, color=None, alignment=WD_ALIGN_PARAGRAPH.LEFT):
     """Add a styled paragraph to the document."""
     p = doc.add_paragraph(text)
@@ -176,8 +184,8 @@ def add_styled_paragraph(doc, text, font_name="Arial", font_size=11, bold=False,
         run.font.color.rgb = color
     return p
 
-def add_styled_table(doc, rows, cols, headers, data, header_color=RGBColor(255, 0, 0)):
-    """Add a styled table to the document."""
+def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), header_text_color=(255, 255, 255), alt_row_bg_color=(192, 192, 192)):
+    """Add a styled table to the document with background colors."""
     table = doc.add_table(rows=rows, cols=cols)
     try:
         table.style = "Table Grid"
@@ -192,11 +200,17 @@ def add_styled_table(doc, rows, cols, headers, data, header_color=RGBColor(255, 
         run.font.name = "Arial"
         run.font.size = Pt(11)
         run.font.bold = True
-        run.font.color.rgb = header_color
+        run.font.color.rgb = RGBColor(*header_text_color)  # White text
+        set_cell_background(cell, header_bg_color)  # Black background
     
-    # Data rows
+    # Data rows with alternating background
     for i, row_data in enumerate(data):
         row = table.rows[i + 1]
+        # Apply gray background to even-numbered rows (0-based index, so i+1 is odd/even)
+        if (i + 1) % 2 == 0:  # Even rows (2, 4, etc.)
+            for cell in row.cells:
+                set_cell_background(cell, alt_row_bg_color)
+        
         for j, cell_text in enumerate(row_data):
             cell = row.cells[j]
             cell.text = cell_text
@@ -305,7 +319,9 @@ def fill_template_and_generate_docx(extracted_info):
             cols=2,
             headers=["PRÉSENCES", "ABSENCES"],
             data=attendance_data,
-            header_color=RGBColor(255, 0, 0)
+            header_bg_color=(0, 0, 0),  # Black background
+            header_text_color=(255, 255, 255),  # White text
+            alt_row_bg_color=(192, 192, 192)  # Gray for alternating rows
         )
         
         doc.add_paragraph()  # Spacer
@@ -373,7 +389,9 @@ def fill_template_and_generate_docx(extracted_info):
             cols=8,
             headers=resolutions_headers,
             data=resolutions_data,
-            header_color=RGBColor(255, 0, 0)
+            header_bg_color=(0, 0, 0),  # Black background
+            header_text_color=(255, 255, 255),  # White text
+            alt_row_bg_color=(192, 192, 192)  # Gray for alternating rows
         )
         
         doc.add_paragraph()  # Spacer
@@ -416,7 +434,9 @@ def fill_template_and_generate_docx(extracted_info):
             cols=5,
             headers=sanctions_headers,
             data=sanctions_data,
-            header_color=RGBColor(255, 0, 0)
+            header_bg_color=(0, 0, 0),  # Black background
+            header_text_color=(255, 255, 255),  # White text
+            alt_row_bg_color=(192, 192, 192)  # Gray for alternating rows
         )
         
         doc.add_paragraph()  # Spacer
