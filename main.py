@@ -60,7 +60,7 @@ def extract_info(transcription, meeting_title, date, attendees, absentees, api_k
     - "start_time" : L'heure de début de la réunion (format HHhMMmin, par exemple 07h00min).
     - "end_time" : L'heure de fin de la réunion (format HHhMMmin, par exemple 10h34min).
     - "presence_list" : Liste des participants présents et absents (chaîne de texte, par exemple "Présents : Alice, Bob\nAbsents : Charlie").
-    - "agenda_items" : Liste des points discutés (chaîne de texte avec des sauts de ligne, par exemple "1. Point 1\n2. Point 2").
+    - "agenda_items" : Liste des points discutés (chaîne de texte avec des sauts de ligne, par exemple "Point 1\nPoint 2").
     - "resolutions_summary" : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). Le champ "dossier" doit refléter le sujet spécifique de la résolution (par exemple, "Planification Projet X", "Budget Q2"), et non le titre général de la réunion.
     - "sanctions_summary" : Liste de sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status").
     - "balance_amount" : Le solde du compte DRI Solidarité (chaîne de texte, par exemple "682040").
@@ -116,7 +116,7 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, absente
     if balance_date is None:
         balance_date = date
     
-    agenda_text = "\n".join([f"{to_roman(idx)}. {item}" for idx, item in enumerate(agenda_items, 1)])
+    agenda_text = "\n".join([f"{item}" for item in agenda_items])
     
     # Combine attendees and absentees into presence_list
     presence_list = f"Présents : {attendees if attendees else 'Non spécifié'}\nAbsents : {absentees if absentees else 'Non spécifié'}"
@@ -303,7 +303,7 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
         else:
             present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Non spécifié" else ["Non spécifié"]
         
-        # Prepare agenda items as a list, using only Roman numerals
+        # Prepare agenda items as a list, adding Roman numerals only here
         agenda_list = extracted_info["agenda_items"].split("\n") if extracted_info["agenda_items"] else ["Non spécifié"]
         agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip()]
         
@@ -361,12 +361,13 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        # --- Rapporteur and President (centered) ---
+        # --- Rapporteur and President (centered, bold) ---
         add_styled_paragraph(
             doc,
             f"Rapporteur : {rapporteur if rapporteur else 'Non spécifié'}",
             font_name="Century",
             font_size=12,
+            bold=True,  # Made bold
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
@@ -375,6 +376,7 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
             f"Président de Réunion : {president if president else 'Non spécifié'}",
             font_name="Century",
             font_size=12,
+            bold=True,  # Made bold
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
@@ -643,8 +645,8 @@ def main():
             for i, item in enumerate(st.session_state.agenda_items):
                 cols = st.columns([0.9, 0.1])
                 with cols[0]:
-                    # Use Roman numerals in the label
-                    new_item = st.text_input(f"Point {to_roman(i+1)}", item, key=f"agenda_item_{i}")
+                    # Removed Roman numerals from UI labels to avoid duplication
+                    new_item = st.text_input(f"Point", item, key=f"agenda_item_{i}")
                 with cols[1]:
                     if st.button("𝗫", key=f"del_agenda_{i}"):
                         pass
@@ -718,7 +720,7 @@ def main():
                             # Override with user inputs
                             extracted_info["start_time"] = start_time
                             extracted_info["end_time"] = end_time
-                            extracted_info["agenda_items"] = "\n".join([f"{to_roman(idx)}. {item}" for idx, item in enumerate(agenda_items, 1)]) if agenda_items else "Non spécifié"
+                            extracted_info["agenda_items"] = "\n".join([f"{item}" for item in agenda_items]) if agenda_items else "Non spécifié"
                             extracted_info["balance_amount"] = balance_amount
                             extracted_info["balance_date"] = balance_date.strftime("%d/%m/%Y")
                 else:
