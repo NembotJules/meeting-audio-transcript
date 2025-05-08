@@ -164,6 +164,48 @@ def to_roman(num):
     }
     return roman_numerals.get(num, str(num))
 
+def add_styled_paragraph(doc, text, font_name="Arial", font_size=11, bold=False, color=None, alignment=WD_ALIGN_PARAGRAPH.LEFT):
+    """Add a styled paragraph to the document."""
+    p = doc.add_paragraph(text)
+    p.alignment = alignment
+    run = p.runs[0]
+    run.font.name = font_name
+    run.font.size = Pt(font_size)
+    run.font.bold = bold
+    if color:
+        run.font.color.rgb = color
+    return p
+
+def add_styled_table(doc, rows, cols, headers, data, header_color=RGBColor(255, 0, 0)):
+    """Add a styled table to the document."""
+    table = doc.add_table(rows=rows, cols=cols)
+    try:
+        table.style = "Table Grid"
+    except KeyError:
+        st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
+    
+    # Header row
+    for j, header in enumerate(headers):
+        cell = table.cell(0, j)
+        cell.text = header
+        run = cell.paragraphs[0].runs[0]
+        run.font.name = "Arial"
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run.font.color.rgb = header_color
+    
+    # Data rows
+    for i, row_data in enumerate(data):
+        row = table.rows[i + 1]
+        for j, cell_text in enumerate(row_data):
+            cell = row.cells[j]
+            cell.text = cell_text
+            run = cell.paragraphs[0].runs[0]
+            run.font.name = "Arial"
+            run.font.size = Pt(11)
+    
+    return table
+
 def fill_template_and_generate_docx(extracted_info):
     """Build the Word document from scratch using python-docx"""
     try:
@@ -191,97 +233,99 @@ def fill_template_and_generate_docx(extracted_info):
         agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip()]
         
         # --- Header Section ---
-        p = doc.add_paragraph("Direction Recherches et Investissements")
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(12)
-        run.font.bold = True
+        add_styled_paragraph(
+            doc,
+            "Direction Recherches et Investissements",
+            font_name="Arial",
+            font_size=12,
+            bold=True,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
+        )
         
-        p = doc.add_paragraph("COMPTE RENDU RÉUNION HEBDOMADAIRE")
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(12)
-        run.font.bold = True
+        add_styled_paragraph(
+            doc,
+            "COMPTE RENDU RÉUNION HEBDOMADAIRE",
+            font_name="Arial",
+            font_size=12,
+            bold=True,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
+        )
         
         doc.add_paragraph()  # Spacer
         
         # --- Date ---
-        p = doc.add_paragraph(extracted_info["date"])
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
+        add_styled_paragraph(
+            doc,
+            extracted_info["date"],
+            font_name="Arial",
+            font_size=11,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
+        )
         
         doc.add_paragraph()  # Spacer
         
         # --- Start and End Time ---
-        p = doc.add_paragraph(f"Heure début : {extracted_info['start_time']}")
-        run = p.runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
+        add_styled_paragraph(
+            doc,
+            f"Heure début : {extracted_info['start_time']}",
+            font_name="Arial",
+            font_size=11
+        )
         
-        p = doc.add_paragraph(f"Heure de fin : {extracted_info['end_time']}")
-        run = p.runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
+        add_styled_paragraph(
+            doc,
+            f"Heure de fin : {extracted_info['end_time']}",
+            font_name="Arial",
+            font_size=11
+        )
         
         doc.add_paragraph()  # Spacer
         
         # --- Attendance Table ---
-        p = doc.add_paragraph("LISTE DE PRÉSENCE / ABSENCE :")
-        run = p.runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
-        run.font.bold = True
+        add_styled_paragraph(
+            doc,
+            "LISTE DE PRÉSENCE / ABSENCE :",
+            font_name="Arial",
+            font_size=11,
+            bold=True
+        )
         
         max_rows = max(len(present_attendees), len(absent_attendees))
         if max_rows == 0:
             max_rows = 1
-        attendance_table = doc.add_table(rows=max_rows + 1, cols=2)
-        try:
-            attendance_table.style = "Table Grid"
-        except KeyError:
-            st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
-        
-        # Header row
-        headers = ["PRÉSENCES", "ABSENCES"]
-        for j, header in enumerate(headers):
-            cell = attendance_table.cell(0, j)
-            cell.text = header
-            run = cell.paragraphs[0].runs[0]
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
-            run.font.bold = True
-            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
-        
-        # Data rows
+        attendance_data = []
         for i in range(max_rows):
-            row = attendance_table.rows[i + 1]
             present_text = present_attendees[i] if i < len(present_attendees) and present_attendees[i] != "Non spécifié" else ""
             absent_text = absent_attendees[i] if i < len(absent_attendees) and absent_attendees[i] != "Non spécifié" else ""
-            row.cells[0].text = present_text
-            row.cells[1].text = absent_text
-            for cell in row.cells:
-                run = cell.paragraphs[0].runs[0]
-                run.font.name = "Arial"
-                run.font.size = Pt(11)
+            attendance_data.append([present_text, absent_text])
+        
+        add_styled_table(
+            doc,
+            rows=max_rows + 1,
+            cols=2,
+            headers=["PRÉSENCES", "ABSENCES"],
+            data=attendance_data,
+            header_color=RGBColor(255, 0, 0)
+        )
         
         doc.add_paragraph()  # Spacer
         
         # --- Agenda Items ---
-        p = doc.add_paragraph("ORDRE DU JOUR :")
-        run = p.runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
-        run.font.bold = True
+        add_styled_paragraph(
+            doc,
+            "ORDRE DU JOUR :",
+            font_name="Arial",
+            font_size=11,
+            bold=True
+        )
         
         for item in agenda_list:
-            p = doc.add_paragraph(item)
-            run = p.runs[0]
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
+            add_styled_paragraph(
+                doc,
+                item,
+                font_name="Arial",
+                font_size=11
+            )
         
         doc.add_paragraph()  # Spacer
         
@@ -299,45 +343,38 @@ def fill_template_and_generate_docx(extracted_info):
                 "report_count": "00"
             }]
         
-        p = doc.add_paragraph("RÉCAPITULATIF DES RÉSOLUTIONS")
-        run = p.runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
-        run.font.bold = True
-        run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        add_styled_paragraph(
+            doc,
+            "RÉCAPITULATIF DES RÉSOLUTIONS",
+            font_name="Arial",
+            font_size=11,
+            bold=True,
+            color=RGBColor(255, 0, 0)
+        )
         
-        resolutions_table = doc.add_table(rows=len(resolutions) + 1, cols=8)
-        try:
-            resolutions_table.style = "Table Grid"
-        except KeyError:
-            st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
+        resolutions_headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
+        resolutions_data = []
+        for resolution in resolutions:
+            row_data = [
+                resolution.get("date", ""),
+                resolution.get("dossier", ""),
+                resolution.get("resolution", ""),
+                resolution.get("responsible", ""),
+                resolution.get("deadline", ""),
+                resolution.get("execution_date", ""),
+                resolution.get("status", ""),
+                str(resolution.get("report_count", ""))
+            ]
+            resolutions_data.append(row_data)
         
-        # Header row
-        headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
-        for j, header in enumerate(headers):
-            cell = resolutions_table.cell(0, j)
-            cell.text = header
-            run = cell.paragraphs[0].runs[0]
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
-            run.font.bold = True
-            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
-        
-        # Data rows
-        for i, resolution in enumerate(resolutions):
-            row = resolutions_table.rows[i + 1]
-            row.cells[0].text = resolution.get("date", "")
-            row.cells[1].text = resolution.get("dossier", "")
-            row.cells[2].text = resolution.get("resolution", "")
-            row.cells[3].text = resolution.get("responsible", "")
-            row.cells[4].text = resolution.get("deadline", "")
-            row.cells[5].text = resolution.get("execution_date", "")
-            row.cells[6].text = resolution.get("status", "")
-            row.cells[7].text = str(resolution.get("report_count", ""))
-            for cell in row.cells:
-                run = cell.paragraphs[0].runs[0]
-                run.font.name = "Arial"
-                run.font.size = Pt(11)
+        add_styled_table(
+            doc,
+            rows=len(resolutions) + 1,
+            cols=8,
+            headers=resolutions_headers,
+            data=resolutions_data,
+            header_color=RGBColor(255, 0, 0)
+        )
         
         doc.add_paragraph()  # Spacer
         
@@ -352,50 +389,45 @@ def fill_template_and_generate_docx(extracted_info):
                 "status": "Non appliqué"
             }]
         
-        p = doc.add_paragraph("RÉCAPITULATIF DES SANCTIONS")
-        run = p.runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
-        run.font.bold = True
-        run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+        add_styled_paragraph(
+            doc,
+            "RÉCAPITULATIF DES SANCTIONS",
+            font_name="Arial",
+            font_size=11,
+            bold=True,
+            color=RGBColor(255, 0, 0)
+        )
         
-        sanctions_table = doc.add_table(rows=len(sanctions) + 1, cols=5)
-        try:
-            sanctions_table.style = "Table Grid"
-        except KeyError:
-            st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
+        sanctions_headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
+        sanctions_data = []
+        for sanction in sanctions:
+            row_data = [
+                sanction.get("name", ""),
+                sanction.get("reason", ""),
+                sanction.get("amount", ""),
+                sanction.get("date", ""),
+                sanction.get("status", "")
+            ]
+            sanctions_data.append(row_data)
         
-        # Header row
-        headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
-        for j, header in enumerate(headers):
-            cell = sanctions_table.cell(0, j)
-            cell.text = header
-            run = cell.paragraphs[0].runs[0]
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
-            run.font.bold = True
-            run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
-        
-        # Data rows
-        for i, sanction in enumerate(sanctions):
-            row = sanctions_table.rows[i + 1]
-            row.cells[0].text = sanction.get("name", "")
-            row.cells[1].text = sanction.get("reason", "")
-            row.cells[2].text = sanction.get("amount", "")
-            row.cells[3].text = sanction.get("date", "")
-            row.cells[4].text = sanction.get("status", "")
-            for cell in row.cells:
-                run = cell.paragraphs[0].runs[0]
-                run.font.name = "Arial"
-                run.font.size = Pt(11)
+        add_styled_table(
+            doc,
+            rows=len(sanctions) + 1,
+            cols=5,
+            headers=sanctions_headers,
+            data=sanctions_data,
+            header_color=RGBColor(255, 0, 0)
+        )
         
         doc.add_paragraph()  # Spacer
         
         # --- Balance Info ---
-        p = doc.add_paragraph(f"Le solde du compte DRI Solidarité (00001-00921711101-10) est de XAF {extracted_info['balance_amount']} au {extracted_info['balance_date']}.")
-        run = p.runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
+        add_styled_paragraph(
+            doc,
+            f"Le solde du compte DRI Solidarité (00001-00921711101-10) est de XAF {extracted_info['balance_amount']} au {extracted_info['balance_date']}.",
+            font_name="Arial",
+            font_size=11
+        )
         
         # Save the document
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
