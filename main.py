@@ -5,7 +5,7 @@ from datetime import datetime
 import requests
 from transformers import pipeline
 from docx import Document
-from docx.shared import Pt, RGBColor
+from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -172,6 +172,18 @@ def set_cell_background(cell, rgb_color):
     shading_elm.set(qn('w:fill'), f"{rgb_color[0]:02X}{rgb_color[1]:02X}{rgb_color[2]:02X}")
     cell._element.get_or_add_tcPr().append(shading_elm)
 
+def set_cell_margins(cell, top=0.1, bottom=0.1, left=0.1, right=0.1):
+    """Set the margins of a table cell to adjust padding."""
+    tc = cell._element
+    tcPr = tc.get_or_add_tcPr()
+    tcMar = OxmlElement('w:tcMar')
+    for margin, value in zip(['top', 'bottom', 'left', 'right'], [top, bottom, left, right]):
+        margin_elm = OxmlElement(f'w:{margin}')
+        margin_elm.set(qn('w:w'), str(int(value * 1440)))  # Convert inches to twips (1 inch = 1440 twips)
+        margin_elm.set(qn('w:type'), 'dxa')
+        tcMar.append(margin_elm)
+    tcPr.append(tcMar)
+
 def add_styled_paragraph(doc, text, font_name="Century", font_size=12, bold=False, color=None, alignment=WD_ALIGN_PARAGRAPH.LEFT):
     """Add a styled paragraph to the document."""
     p = doc.add_paragraph(text)
@@ -220,7 +232,7 @@ def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), 
     
     return table
 
-def add_text_in_box(doc, text, bg_color=(192, 192, 192)):
+def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14):
     """Add text inside a single-cell table with a background color to simulate a box."""
     table = doc.add_table(rows=1, cols=1)
     table.style = "Table Grid"
@@ -230,9 +242,11 @@ def add_text_in_box(doc, text, bg_color=(192, 192, 192)):
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = paragraph.runs[0]
     run.font.name = "Century"
-    run.font.size = Pt(12)
+    run.font.size = Pt(font_size)  # Increased font size for bigger appearance
     run.font.bold = True
     set_cell_background(cell, bg_color)
+    # Increase cell padding to make the box appear bigger
+    set_cell_margins(cell, top=0.2, bottom=0.2, left=0.3, right=0.3)
     return table
 
 def fill_template_and_generate_docx(extracted_info):
@@ -262,19 +276,19 @@ def fill_template_and_generate_docx(extracted_info):
         agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip()]
         
         # --- Header Section ---
-        # Add "Direction Recherches et Investissements" in a gray box
+        # Add "Direction Recherches et Investissements" in a larger gray box
         add_text_in_box(
             doc,
             "Direction Recherches et Investissements",
-            bg_color=(192, 192, 192)  # Gray background
+            bg_color=(192, 192, 192),  # Gray background
+            font_size=16  # Increased font size for bigger appearance
         )
         
-        doc.add_paragraph()  # Spacer between gray box and title
-        
-        # Add "Compte Rendu de Reunion Hebdomadaire" below the box in red
+        # Reduced space: no extra paragraph here
+        # Add "COMPTE RENDU DE REUNION HEBDOMADAIRE" in red
         add_styled_paragraph(
             doc,
-            "Compte Rendu de Reunion Hebdomadaire",
+            "COMPTE RENDU DE REUNION HEBDOMADAIRE",
             font_name="Century",
             font_size=12,
             bold=True,
@@ -282,25 +296,25 @@ def fill_template_and_generate_docx(extracted_info):
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        doc.add_paragraph()  # Spacer
-        
-        # --- Date ---
+        # Reduced space: no extra paragraph here
+        # --- Date (in red) ---
         add_styled_paragraph(
             doc,
             extracted_info["date"],
             font_name="Century",
             font_size=12,
+            color=RGBColor(192, 0, 0),  # #c00000
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        doc.add_paragraph()  # Spacer between date and Heure de début
-        
-        # --- Start and End Time (centered, no space between them) ---
+        # Reduced space: no extra paragraph here
+        # --- Start and End Time (centered, bold, no space between them) ---
         add_styled_paragraph(
             doc,
             f"Heure de début : {extracted_info['start_time']}",
             font_name="Century",
             font_size=12,
+            bold=True,
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
@@ -310,6 +324,7 @@ def fill_template_and_generate_docx(extracted_info):
             f"Heure de fin : {extracted_info['end_time']}",
             font_name="Century",
             font_size=12,
+            bold=True,
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
@@ -318,15 +333,7 @@ def fill_template_and_generate_docx(extracted_info):
         # --- Attendance Table ---
         add_styled_paragraph(
             doc,
-            "◆",
-            font_name="Century",
-            font_size=12,
-            alignment=WD_ALIGN_PARAGRAPH.LEFT
-        )
-        
-        add_styled_paragraph(
-            doc,
-            "LISTE DE PRÉSENCE / ABSENCE :",
+            "◆ Liste de présence/absence",
             font_name="Century",
             font_size=12,
             bold=True
@@ -357,15 +364,7 @@ def fill_template_and_generate_docx(extracted_info):
         # --- Agenda Items ---
         add_styled_paragraph(
             doc,
-            "◆",
-            font_name="Century",
-            font_size=12,
-            alignment=WD_ALIGN_PARAGRAPH.LEFT
-        )
-        
-        add_styled_paragraph(
-            doc,
-            "ORDRE DU JOUR :",
+            "◆ Ordre du jour",
             font_name="Century",
             font_size=12,
             bold=True
