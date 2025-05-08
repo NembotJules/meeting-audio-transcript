@@ -7,7 +7,7 @@ from transformers import pipeline
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_ALIGN_VERTICAL
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import warnings
@@ -193,7 +193,7 @@ def set_table_width(table, width_in_inches):
     table.width = table_width
     for row in table.rows:
         for cell in row.cells:
-            cell.width = table_width  # This ensures the table takes the full width
+            cell.width = table_width  # This ensures the table takes the specified width
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
 def set_column_widths(table, widths_in_inches):
@@ -258,14 +258,16 @@ def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), 
     
     return table
 
-def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14):
-    """Add text inside a single-cell table with a background color to simulate a box."""
+def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14, box_width_in_inches=5.0):
+    """Add text inside a single-cell table with a background color to simulate a centered box."""
     table = doc.add_table(rows=1, cols=1)
     table.style = "Table Grid"
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER  # Center the table on the page
+    set_table_width(table, box_width_in_inches)  # Set specific width for the box
     cell = table.cell(0, 0)
     cell.text = text
     paragraph = cell.paragraphs[0]
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER  # Center the text inside the cell
     run = paragraph.runs[0]
     run.font.name = "Century"
     run.font.size = Pt(font_size)  # Increased font size for bigger appearance
@@ -297,20 +299,21 @@ def fill_template_and_generate_docx(extracted_info):
         else:
             present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Non spécifié" else ["Non spécifié"]
         
-        # Prepare agenda items as a list
+        # Prepare agenda items as a list, using only Roman numerals
         agenda_list = extracted_info["agenda_items"].split("\n") if extracted_info["agenda_items"] else ["Non spécifié"]
         agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip()]
         
         # --- Header Section ---
-        # Add "Direction Recherches et Investissements" in a larger gray box
+        # Add "Direction Recherches et Investissements" in a centered gray box
         add_text_in_box(
             doc,
             "Direction Recherches et Investissements",
             bg_color=(192, 192, 192),  # Gray background
-            font_size=16  # Increased font size for bigger appearance
+            font_size=16,  # Increased font size for bigger appearance
+            box_width_in_inches=5.0  # Set width of the box
         )
         
-        doc.add_paragraph()  # Added space between gray box and title
+        doc.add_paragraph()  # Spacer between gray box and title
         
         # Add "COMPTE RENDU DE REUNION HEBDOMADAIRE" in red
         add_styled_paragraph(
