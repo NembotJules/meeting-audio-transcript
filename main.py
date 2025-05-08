@@ -367,7 +367,7 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
             f"Rapporteur : {rapporteur if rapporteur else 'Non spécifié'}",
             font_name="Century",
             font_size=12,
-            bold=True,  # Made bold
+            bold=True,
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
@@ -376,7 +376,7 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
             f"Président de Réunion : {president if president else 'Non spécifié'}",
             font_name="Century",
             font_size=12,
-            bold=True,  # Made bold
+            bold=True,
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
@@ -434,7 +434,8 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
                 font_size=12
             )
         
-        doc.add_paragraph()  # Spacer
+        # Add a page break after "Ordre du jour" to make it the last section on the page
+        doc.add_page_break()
         
         # --- Resolutions Table ---
         resolutions = extracted_info.get("resolutions_summary", [])
@@ -645,7 +646,6 @@ def main():
             for i, item in enumerate(st.session_state.agenda_items):
                 cols = st.columns([0.9, 0.1])
                 with cols[0]:
-                    # Removed Roman numerals from UI labels to avoid duplication
                     new_item = st.text_input(f"Point", item, key=f"agenda_item_{i}")
                 with cols[1]:
                     if st.button("𝗫", key=f"del_agenda_{i}"):
