@@ -7,6 +7,7 @@ from transformers import pipeline
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import warnings
@@ -184,6 +185,24 @@ def set_cell_margins(cell, top=0.1, bottom=0.1, left=0.1, right=0.1):
         tcMar.append(margin_elm)
     tcPr.append(tcMar)
 
+def set_table_width(table, width_in_inches):
+    """Set the width of the table and allow columns to adjust proportionally."""
+    table.autofit = False
+    table.allow_autofit = False
+    table_width = Inches(width_in_inches)
+    table.width = table_width
+    for row in table.rows:
+        for cell in row.cells:
+            cell.width = table_width  # This ensures the table takes the full width
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+def set_column_widths(table, widths_in_inches):
+    """Set preferred widths for each column in the table."""
+    for i, width in enumerate(widths_in_inches):
+        for row in table.rows:
+            cell = row.cells[i]
+            cell.width = Inches(width)
+
 def add_styled_paragraph(doc, text, font_name="Century", font_size=12, bold=False, color=None, alignment=WD_ALIGN_PARAGRAPH.LEFT):
     """Add a styled paragraph to the document."""
     p = doc.add_paragraph(text)
@@ -196,13 +215,20 @@ def add_styled_paragraph(doc, text, font_name="Century", font_size=12, bold=Fals
         run.font.color.rgb = color
     return p
 
-def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), header_text_color=(255, 255, 255), alt_row_bg_color=(192, 192, 192)):
-    """Add a styled table to the document with background colors."""
+def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), header_text_color=(255, 255, 255), alt_row_bg_color=(192, 192, 192), column_widths=None):
+    """Add a styled table to the document with background colors and custom widths."""
     table = doc.add_table(rows=rows, cols=cols)
     try:
         table.style = "Table Grid"
     except KeyError:
         st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
+    
+    # Set table width to make it wider (e.g., 6.5 inches to fit standard page width better)
+    set_table_width(table, 6.5)
+    
+    # Set column widths if provided
+    if column_widths:
+        set_column_widths(table, column_widths)
     
     # Header row
     for j, header in enumerate(headers):
@@ -284,7 +310,8 @@ def fill_template_and_generate_docx(extracted_info):
             font_size=16  # Increased font size for bigger appearance
         )
         
-        # Reduced space: no extra paragraph here
+        doc.add_paragraph()  # Added space between gray box and title
+        
         # Add "COMPTE RENDU DE REUNION HEBDOMADAIRE" in red
         add_styled_paragraph(
             doc,
@@ -296,18 +323,17 @@ def fill_template_and_generate_docx(extracted_info):
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        # Reduced space: no extra paragraph here
-        # --- Date (in red) ---
+        # --- Date (in red, bold) ---
         add_styled_paragraph(
             doc,
             extracted_info["date"],
             font_name="Century",
             font_size=12,
+            bold=True,
             color=RGBColor(192, 0, 0),  # #c00000
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        # Reduced space: no extra paragraph here
         # --- Start and End Time (centered, bold, no space between them) ---
         add_styled_paragraph(
             doc,
@@ -333,7 +359,7 @@ def fill_template_and_generate_docx(extracted_info):
         # --- Attendance Table ---
         add_styled_paragraph(
             doc,
-            "◆ Liste de présence/absence",
+            "◆ LISTE DE PRÉSENCE/ABSENCE",
             font_name="Century",
             font_size=12,
             bold=True
@@ -348,6 +374,8 @@ def fill_template_and_generate_docx(extracted_info):
             absent_text = absent_attendees[i] if i < len(absent_attendees) and absent_attendees[i] != "Non spécifié" else ""
             attendance_data.append([present_text, absent_text])
         
+        # Define column widths for the attendance table (total width = 6.5 inches)
+        attendance_column_widths = [3.25, 3.25]  # Equal widths for 2 columns
         add_styled_table(
             doc,
             rows=max_rows + 1,
@@ -356,7 +384,8 @@ def fill_template_and_generate_docx(extracted_info):
             data=attendance_data,
             header_bg_color=(0, 0, 0),  # Black background
             header_text_color=(255, 255, 255),  # White text
-            alt_row_bg_color=(192, 192, 192)  # Gray for alternating rows
+            alt_row_bg_color=(192, 192, 192),  # Gray for alternating rows
+            column_widths=attendance_column_widths
         )
         
         doc.add_paragraph()  # Spacer
@@ -418,6 +447,8 @@ def fill_template_and_generate_docx(extracted_info):
             ]
             resolutions_data.append(row_data)
         
+        # Define column widths for the resolutions table (total width = 6.5 inches)
+        resolutions_column_widths = [0.8, 1.0, 1.5, 0.7, 1.0, 0.8, 0.7, 0.8]
         add_styled_table(
             doc,
             rows=len(resolutions) + 1,
@@ -426,7 +457,8 @@ def fill_template_and_generate_docx(extracted_info):
             data=resolutions_data,
             header_bg_color=(0, 0, 0),  # Black background
             header_text_color=(255, 255, 255),  # White text
-            alt_row_bg_color=(192, 192, 192)  # Gray for alternating rows
+            alt_row_bg_color=(192, 192, 192),  # Gray for alternating rows
+            column_widths=resolutions_column_widths
         )
         
         doc.add_paragraph()  # Spacer
@@ -463,6 +495,8 @@ def fill_template_and_generate_docx(extracted_info):
             ]
             sanctions_data.append(row_data)
         
+        # Define column widths for the sanctions table (total width = 6.5 inches)
+        sanctions_column_widths = [1.3, 1.5, 1.2, 1.0, 1.5]
         add_styled_table(
             doc,
             rows=len(sanctions) + 1,
@@ -471,7 +505,8 @@ def fill_template_and_generate_docx(extracted_info):
             data=sanctions_data,
             header_bg_color=(0, 0, 0),  # Black background
             header_text_color=(255, 255, 255),  # White text
-            alt_row_bg_color=(192, 192, 192)  # Gray for alternating rows
+            alt_row_bg_color=(192, 192, 192),  # Gray for alternating rows
+            column_widths=sanctions_column_widths
         )
         
         doc.add_paragraph()  # Spacer
