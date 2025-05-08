@@ -172,7 +172,7 @@ def set_cell_background(cell, rgb_color):
     shading_elm.set(qn('w:fill'), f"{rgb_color[0]:02X}{rgb_color[1]:02X}{rgb_color[2]:02X}")
     cell._element.get_or_add_tcPr().append(shading_elm)
 
-def add_styled_paragraph(doc, text, font_name="Arial", font_size=11, bold=False, color=None, alignment=WD_ALIGN_PARAGRAPH.LEFT):
+def add_styled_paragraph(doc, text, font_name="Century", font_size=12, bold=False, color=None, alignment=WD_ALIGN_PARAGRAPH.LEFT):
     """Add a styled paragraph to the document."""
     p = doc.add_paragraph(text)
     p.alignment = alignment
@@ -197,8 +197,8 @@ def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), 
         cell = table.cell(0, j)
         cell.text = header
         run = cell.paragraphs[0].runs[0]
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
+        run.font.name = "Century"
+        run.font.size = Pt(12)
         run.font.bold = True
         run.font.color.rgb = RGBColor(*header_text_color)  # White text
         set_cell_background(cell, header_bg_color)  # Black background
@@ -215,8 +215,8 @@ def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), 
             cell = row.cells[j]
             cell.text = cell_text
             run = cell.paragraphs[0].runs[0]
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
+            run.font.name = "Century"
+            run.font.size = Pt(12)
     
     return table
 
@@ -229,7 +229,7 @@ def add_text_in_box(doc, text, bg_color=(192, 192, 192)):
     paragraph = cell.paragraphs[0]
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = paragraph.runs[0]
-    run.font.name = "Arial"
+    run.font.name = "Century"
     run.font.size = Pt(12)
     run.font.bold = True
     set_cell_background(cell, bg_color)
@@ -269,13 +269,16 @@ def fill_template_and_generate_docx(extracted_info):
             bg_color=(192, 192, 192)  # Gray background
         )
         
-        # Add "COMPTE RENDU RÉUNION HEBDOMADAIRE" below the box
+        doc.add_paragraph()  # Spacer between gray box and title
+        
+        # Add "Compte Rendu de Reunion Hebdomadaire" below the box in red
         add_styled_paragraph(
             doc,
-            "COMPTE RENDU RÉUNION HEBDOMADAIRE",
-            font_name="Arial",
+            "Compte Rendu de Reunion Hebdomadaire",
+            font_name="Century",
             font_size=12,
             bold=True,
+            color=RGBColor(192, 0, 0),  # #c00000
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
@@ -285,46 +288,47 @@ def fill_template_and_generate_docx(extracted_info):
         add_styled_paragraph(
             doc,
             extracted_info["date"],
-            font_name="Arial",
-            font_size=11,
+            font_name="Century",
+            font_size=12,
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        doc.add_paragraph()  # Spacer
+        doc.add_paragraph()  # Spacer between date and Heure de début
         
-        # --- Start and End Time (now centered) ---
+        # --- Start and End Time (centered, no space between them) ---
         add_styled_paragraph(
             doc,
-            f"Heure début : {extracted_info['start_time']}",
-            font_name="Arial",
-            font_size=11,
+            f"Heure de début : {extracted_info['start_time']}",
+            font_name="Century",
+            font_size=12,
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
+        # No spacer between Heure de début and Heure de fin
         add_styled_paragraph(
             doc,
             f"Heure de fin : {extracted_info['end_time']}",
-            font_name="Arial",
-            font_size=11,
+            font_name="Century",
+            font_size=12,
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        doc.add_paragraph()  # Spacer
+        doc.add_paragraph()  # Spacer after Heure de fin
         
         # --- Attendance Table ---
         add_styled_paragraph(
             doc,
-            "----------",
-            font_name="Arial",
-            font_size=11,
+            "◆",
+            font_name="Century",
+            font_size=12,
             alignment=WD_ALIGN_PARAGRAPH.LEFT
         )
         
         add_styled_paragraph(
             doc,
             "LISTE DE PRÉSENCE / ABSENCE :",
-            font_name="Arial",
-            font_size=11,
+            font_name="Century",
+            font_size=12,
             bold=True
         )
         
@@ -353,17 +357,17 @@ def fill_template_and_generate_docx(extracted_info):
         # --- Agenda Items ---
         add_styled_paragraph(
             doc,
-            "----------",
-            font_name="Arial",
-            font_size=11,
+            "◆",
+            font_name="Century",
+            font_size=12,
             alignment=WD_ALIGN_PARAGRAPH.LEFT
         )
         
         add_styled_paragraph(
             doc,
             "ORDRE DU JOUR :",
-            font_name="Arial",
-            font_size=11,
+            font_name="Century",
+            font_size=12,
             bold=True
         )
         
@@ -371,8 +375,8 @@ def fill_template_and_generate_docx(extracted_info):
             add_styled_paragraph(
                 doc,
                 item,
-                font_name="Arial",
-                font_size=11
+                font_name="Century",
+                font_size=12
             )
         
         doc.add_paragraph()  # Spacer
@@ -394,10 +398,10 @@ def fill_template_and_generate_docx(extracted_info):
         add_styled_paragraph(
             doc,
             "RÉCAPITULATIF DES RÉSOLUTIONS",
-            font_name="Arial",
-            font_size=11,
+            font_name="Century",
+            font_size=12,
             bold=True,
-            color=RGBColor(255, 0, 0)
+            color=RGBColor(192, 0, 0)  # #c00000
         )
         
         resolutions_headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
@@ -442,10 +446,10 @@ def fill_template_and_generate_docx(extracted_info):
         add_styled_paragraph(
             doc,
             "RÉCAPITULATIF DES SANCTIONS",
-            font_name="Arial",
-            font_size=11,
+            font_name="Century",
+            font_size=12,
             bold=True,
-            color=RGBColor(255, 0, 0)
+            color=RGBColor(192, 0, 0)  # #c00000
         )
         
         sanctions_headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
@@ -477,8 +481,8 @@ def fill_template_and_generate_docx(extracted_info):
         add_styled_paragraph(
             doc,
             f"Le solde du compte DRI Solidarité (00001-00921711101-10) est de XAF {extracted_info['balance_amount']} au {extracted_info['balance_date']}.",
-            font_name="Arial",
-            font_size=11
+            font_name="Century",
+            font_size=12
         )
         
         # Save the document
