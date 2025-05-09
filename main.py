@@ -52,22 +52,22 @@ def transcribe_audio(audio_file, file_extension, model_size="base"):
         st.error(f"Erreur lors de la transcription audio: {e}")
         return None
 
-def extract_info(transcription, meeting_title, date, attendees, absentees, api_key):
+def extract_info(transcription, api_key):
     """Extract key information from the transcription using Deepseek API with an improved prompt"""
     prompt = f"""
-    Vous êtes un expert en rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez et structurez les informations suivantes pour remplir un modèle de compte rendu de réunion. Retournez les informations sous forme de JSON avec les clés suivantes :
+    Vous êtes un expert en rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez et structurez toutes les informations nécessaires pour remplir un modèle de compte rendu de réunion. Retournez les informations sous forme de JSON avec les clés suivantes :
 
-    - "date" : La date de la réunion (format DD/MM/YYYY). Si non trouvée, utilisez la date fournie ({date}).
-    - "start_time" : L'heure de début de la réunion (format HHhMMmin, ex: 07h00min). Recherchez des mentions explicites (ex: "6:34AM") ou des indices dans l'en-tête.
-    - "end_time" : L'heure de fin de la réunion (format HHhMMmin). Si une durée est mentionnée (ex: "2h 21m 21s"), calculez l'heure de fin à partir de l'heure de début. Sinon, utilisez "Non spécifié".
-    - "president" : Le nom du président de la réunion. Identifiez-le via des mentions comme "président" ou "Monsieur le Président" (ex: "Cedric DONFACK" si appelé ainsi).
+    - "date" : La date de la réunion (format DD/MM/YYYY, ex: "02/05/2025"). Recherchez des mentions explicites (ex: "May 2, 2025") ou des indices contextuels.
+    - "start_time" : L'heure de début de la réunion (format HHhMMmin, ex: "06h34min"). Recherchez des mentions comme "6:34AM" ou "06h34".
+    - "end_time" : L'heure de fin de la réunion (format HHhMMmin, ex: "08h55min"). Si une durée est mentionnée (ex: "2h 21m 21s"), calculez l'heure de fin à partir de l'heure de début.
+    - "president" : Le nom du président de la réunion. Identifiez-le via des mentions comme "président" ou "Monsieur le Président" (ex: "Cedric DONFACK").
     - "rapporteur" : Le nom du rapporteur. Identifiez-le via des mentions de rédaction du rapport (ex: "Nous allons tester ces spécifications avec le rapport" peut indiquer Emmanuel TEINGA).
-    - "presence_list" : Liste des participants présents (liste de noms). Identifiez les noms des personnes intervenant ou mentionnées comme présentes. Excluez les absents explicites (ex: "Brian n'est pas là").
+    - "presence_list" : Liste des participants présents (liste de noms). Identifiez les noms des personnes intervenant dans la discussion ou mentionnées comme présentes (ex: noms des intervenants ou liste explicite).
     - "absence_list" : Liste des participants absents (liste de noms). Identifiez les noms mentionnés comme absents (ex: "Brian n'est pas là").
-    - "agenda_items" : Liste des points discutés, déduits des sections ou rapports par département/sujet (ex: "Rapport sur la digitalisation", "Projet de migration"). Structurez comme une liste de chaînes.
-    - "resolutions_summary" : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). 
+    - "agenda_items" : Liste des points discutés, déduits des sections ou rapports par département/sujet (ex: ["Rapport sur la digitalisation", "Projet de migration"]). Structurez comme une liste de chaînes.
+    - "resolutions_summary" : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count").
       - "date" : Date de la résolution (généralement la date de la réunion).
-      - "dossier" : Sujet spécifique (ex: "Campagne de communication", "Automatisation des dashboards").
+      - "dossier" : Sujet spécifique (ex: "Campagne de communication").
       - "resolution" : Description claire de l'action à prendre (ex: "Préparer les templates pour la campagne").
       - "responsible" : Nom de la personne responsable (ex: "KAFO DJIMELI Christian").
       - "deadline" : Délai explicite (ex: "08/05/2025" ou "Lundi 05/05/2025"). Si non précisé, utilisez "Non spécifié".
@@ -77,19 +77,15 @@ def extract_info(transcription, meeting_title, date, attendees, absentees, api_k
     - "sanctions_summary" : Liste de sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status"). Si aucune sanction, retournez une liste vide.
     - "balance_amount" : Le solde du compte DRI Solidarité (ex: "682040"). Si non trouvé, utilisez "Non spécifié".
     - "balance_date" : La date du solde (format DD/MM/YYYY). Si non trouvée, utilisez la date de la réunion.
+    - "meeting_title" : Titre de la réunion. Déduisez-le à partir du contexte (ex: "Réunion hebdomadaire" ou un titre mentionné). Si non trouvé, utilisez "Réunion hebdomadaire".
 
-    Détails de la Réunion :
-    - Titre : {meeting_title}
-    - Date par défaut : {date}
-    - Participants fournis : {attendees}
-    - Absents fournis : {absentees}
-    
     Transcription :
     {transcription}
     
     Instructions supplémentaires :
     - Priorisez les informations explicites dans la transcription (ex: "May 2, 2025, 6:34AM" pour l'heure de début).
     - Pour l'heure de fin, calculez à partir de la durée si fournie (ex: "2h 21m 21s" ajouté à 6:34AM donne 8:55:21).
+    - Pour les présences, incluez tous les noms des intervenants ou ceux mentionnés comme présents. Pour les absences, recherchez des mentions explicites d'absence.
     - Identifiez le président et le rapporteur en fonction du contexte (ex: qui dirige la réunion, qui rédige le rapport).
     - Pour les résolutions, extrayez chaque action assignée avec son responsable et son délai (ex: "Préparer les templates d'ici lundi" -> deadline "Lundi 05/05/2025").
     - Pour les points d'ordre du jour, regroupez les discussions par sujet ou département (ex: "Rapport de Christian sur la digitalisation").
@@ -123,9 +119,11 @@ def extract_info(transcription, meeting_title, date, attendees, absentees, api_k
                 extracted_data = json.loads(raw_response)
                 # Validation des données extraites
                 if not extracted_data.get("presence_list"):
-                    extracted_data["presence_list"] = attendees.split(",") if attendees else []
+                    extracted_data["presence_list"] = []
                 if not extracted_data.get("absence_list"):
-                    extracted_data["absence_list"] = absentees.split(",") if absentees else []
+                    extracted_data["absence_list"] = []
+                if not extracted_data.get("meeting_title"):
+                    extracted_data["meeting_title"] = "Réunion hebdomadaire"
                 return extracted_data
             except json.JSONDecodeError as e:
                 st.error(f"Erreur lors du parsing JSON : {e}. Réponse brute : {raw_response}")
@@ -137,26 +135,21 @@ def extract_info(transcription, meeting_title, date, attendees, absentees, api_k
         st.error(f"Erreur lors de l'extraction des informations : {e}")
         return None
 
-def extract_info_fallback(transcription, meeting_title, date, attendees, absentees, start_time="Non spécifié", end_time="Non spécifié", agenda_items=None, balance_amount="Non spécifié", balance_date=None, rapporteur="Non spécifié", president="Non spécifié"):
+def extract_info_fallback(transcription):
     """Fallback mode for structuring information if Deepseek API fails"""
-    if agenda_items is None:
-        agenda_items = ["Non spécifié dans la transcription."]
-    if balance_date is None:
-        balance_date = date
-    
     # Extraction heuristique minimale
-    presence_list = [name.strip() for name in attendees.split(",") if name.strip()] if attendees else []
-    absence_list = [name.strip() for name in absentees.split(",") if name.strip()] if absentees else []
+    date_match = re.search(r'(\d{1,2}\s*(?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s*\d{4})', transcription, re.IGNORECASE)
+    date = date_match.group(1) if date_match else datetime.now().strftime("%d/%m/%Y")
     
-    # Recherche d'heure de début et de fin via regex
     start_time_match = re.search(r'(\d{1,2}:\d{2})\s*(AM|PM)?', transcription, re.IGNORECASE)
-    duration_match = re.search(r'(\d+h\s*\d+m\s*\d+s)', transcription)
-    
+    start_time = "Non spécifié"
     if start_time_match:
         time_str = start_time_match.group(1)
         hours, minutes = map(int, time_str.split(":"))
         start_time = f"{hours:02d}h{minutes:02d}min"
     
+    end_time = "Non spécifié"
+    duration_match = re.search(r'(\d+h\s*\d+m\s*\d+s)', transcription)
     if duration_match and start_time_match:
         duration = duration_match.group(1)
         hours = int(re.search(r'(\d+)h', duration).group(1)) if 'h' in duration else 0
@@ -170,15 +163,25 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, absente
             st.error(f"Erreur lors du calcul de l'heure de fin : {e}")
             end_time = "Non spécifié"
     
-    # Recherche du président
+    president = "Non spécifié"
     president_match = re.search(r'(Monsieur le Président.*?)\s*(\w+\s+\w+)', transcription, re.IGNORECASE)
     if president_match:
         president = president_match.group(2)
     
-    # Recherche du rapporteur
+    rapporteur = "Non spécifié"
     rapporteur_match = re.search(r'(rapport\s*de\s*la\s*science|redaction\s*du\s*rapport).*?(\w+\s+\w+)', transcription, re.IGNORECASE)
     if rapporteur_match:
         rapporteur = rapporteur_match.group(2)
+    
+    # Extraction des présences (noms des intervenants)
+    presence_list = []
+    name_matches = re.findall(r'(\w+\s+\w+)(?:\s*:\s*|\s*parle\s*|\s*dit\s*)', transcription, re.IGNORECASE)
+    presence_list = list(set(name_matches))  # Éliminer les doublons
+    
+    # Extraction des absences
+    absence_list = []
+    absence_matches = re.findall(r'(\w+\s+\w+)\s*(n\'est pas là|est absent)', transcription, re.IGNORECASE)
+    absence_list = [match[0] for match in absence_matches]
     
     # Extraction des points d'ordre du jour
     agenda_items = []
@@ -213,8 +216,9 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, absente
             }
         ],
         "sanctions_summary": [],
-        "balance_amount": balance_amount,
-        "balance_date": balance_date,
+        "balance_amount": "Non spécifié",
+        "balance_date": date,
+        "meeting_title": "Réunion hebdomadaire",
         "transcription": transcription
     }
 
@@ -331,13 +335,13 @@ def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=16, box_width
     set_cell_margins(cell, top=0.2, bottom=0.2, left=0.3, right=0.3)
     return table
 
-def fill_template_and_generate_docx(extracted_info, rapporteur, president):
+def fill_template_and_generate_docx(extracted_info):
     """Build the Word document from scratch using python-docx"""
     try:
         doc = Document()
         
-        rapporteur = extracted_info.get("rapporteur", rapporteur) or "Non spécifié"
-        president = extracted_info.get("president", president) or "Non spécifié"
+        rapporteur = extracted_info.get("rapporteur", "Non spécifié")
+        president = extracted_info.get("president", "Non spécifié")
         presence_list = extracted_info.get("presence_list", [])
         absence_list = extracted_info.get("absence_list", [])
         
@@ -648,153 +652,70 @@ def main():
         else:
             transcribe_button = False
     
-    col1, col2 = st.columns(2)
+    st.header("Transcription & Sortie")
     
-    with col1:
-        st.header("Détails de la Réunion")
-        meeting_title = st.text_input("Titre de la Réunion", value="Réunion", key="meeting_title")
-        meeting_date = st.date_input("Date de la Réunion", datetime.now(), key="meeting_date")
-        start_time = st.text_input("Heure de début (format HHhMMmin, ex: 07h00min)", value="Non spécifié", key="start_time")
-        end_time = st.text_input("Heure de fin (format HHhMMmin, ex: 10h34min)", value="Non spécifié", key="end_time")
-        attendees = st.text_area("Participants Présents (séparés par des virgules)", key="attendees")
-        absentees = st.text_area("Participants Absents (séparés par des virgules)", key="absentees")
-        rapporteur = st.text_input("Rapporteur", value="Non spécifié", key="rapporteur")
-        president = st.text_input("Président de Réunion", value="Non spécifié", key="president")
+    if transcribe_button and WHISPER_AVAILABLE and uploaded_file is not None:
+        with st.spinner(f"Transcription audio avec le modèle Whisper {whisper_model}..."):
+            transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
         
-        st.subheader("Ordre du Jour")
-        agenda_items_container = st.container()
-        if 'agenda_items' not in st.session_state:
-            st.session_state.agenda_items = [""]
-        
-        with agenda_items_container:
-            new_agenda_items = []
-            for i, item in enumerate(st.session_state.agenda_items):
-                cols = st.columns([0.9, 0.1])
-                with cols[0]:
-                    new_item = st.text_input(f"Point {i+1}", item, key=f"agenda_item_{i}")
-                with cols[1]:
-                    if st.button("𝗫", key=f"del_agenda_{i}"):
-                        pass
-                    else:
-                        new_agenda_items.append(new_item)
-            st.session_state.agenda_items = new_agenda_items if new_agenda_items else [""]
-        
-        if st.button("Ajouter un Point à l'Ordre du Jour"):
-            st.session_state.agenda_items.append("")
-            st.rerun()
-        
-        st.subheader("Solde du Compte DRI Solidarité")
-        balance_amount = st.text_input("Solde (en XAF, ex: 682040)", value="Non spécifié", key="balance_amount")
-        balance_date = st.date_input("Date du solde", value=meeting_date, key="balance_date")
-    
-    with col2:
-        st.header("Transcription & Sortie")
-        
-        if transcribe_button and WHISPER_AVAILABLE and uploaded_file is not None:
-            with st.spinner(f"Transcription audio avec le modèle Whisper {whisper_model}..."):
-                transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
-            
-            if transcription and not transcription.startswith("Erreur"):
-                st.success("Transcription terminée!")
-                st.session_state.transcription = transcription
-        elif manual_transcript:
-            transcription = manual_transcript.strip()
-            if transcription:
-                st.success("Transcription manuelle chargée!")
-                st.session_state.transcription = transcription
-            else:
-                st.error("Veuillez entrer une transcription valide.")
-                transcription = None
-        else:
-            transcription = getattr(st.session_state, 'transcription', None)
-        
+        if transcription and not transcription.startswith("Erreur"):
+            st.success("Transcription terminée!")
+            st.session_state.transcription = transcription
+    elif manual_transcript:
+        transcription = manual_transcript.strip()
         if transcription:
-            st.subheader("Transcription")
-            st.text_area("Modifier si nécessaire:", transcription, height=200, key="edited_transcription")
-            
-            if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
-                edited_transcription = st.session_state.get("edited_transcription", transcription)
-                agenda_items = [item for item in st.session_state.agenda_items if item.strip()]
-                
-                if st.session_state.api_key:
-                    with st.spinner("Extraction des informations avec Deepseek..."):
-                        extracted_info = extract_info(
-                            edited_transcription,
-                            meeting_title,
-                            meeting_date.strftime("%d/%m/%Y"),
-                            attendees,
-                            absentees,
-                            st.session_state.api_key
-                        )
-                        if not extracted_info:
-                            extracted_info = extract_info_fallback(
-                                edited_transcription,
-                                meeting_title,
-                                meeting_date.strftime("%d/%m/%Y"),
-                                attendees,
-                                absentees,
-                                start_time,
-                                end_time,
-                                agenda_items,
-                                balance_amount,
-                                balance_date.strftime("%d/%m/%Y"),
-                                rapporteur,
-                                president
-                            )
-                        else:
-                            extracted_info["start_time"] = extracted_info.get("start_time", start_time)
-                            extracted_info["end_time"] = extracted_info.get("end_time", end_time)
-                            extracted_info["balance_amount"] = extracted_info.get("balance_amount", balance_amount)
-                            extracted_info["balance_date"] = extracted_info.get("balance_date", balance_date.strftime("%d/%m/%Y"))
-                            if agenda_items:
-                                extracted_info["agenda_items"] = agenda_items
-                else:
-                    st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
-                    extracted_info = extract_info_fallback(
-                        edited_transcription,
-                        meeting_title,
-                        meeting_date.strftime("%d/%m/%Y"),
-                        attendees,
-                        absentees,
-                        start_time,
-                        end_time,
-                        agenda_items,
-                        balance_amount,
-                        balance_date.strftime("%d/%m/%Y"),
-                        rapporteur,
-                        president
-                    )
-                
-                if extracted_info:
-                    st.session_state.extracted_info = extracted_info
-                    st.subheader("Informations Extraites")
-                    st.json(extracted_info)
-                    
-                    with st.spinner("Génération du document Word..."):
-                        docx_data = fill_template_and_generate_docx(extracted_info, rapporteur, president)
-                    
-                    if docx_data:
-                        st.download_button(
-                            label="Télécharger les Notes de Réunion",
-                            data=docx_data,
-                            file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
+            st.success("Transcription manuelle chargée!")
+            st.session_state.transcription = transcription
+        else:
+            st.error("Veuillez entrer une transcription valide.")
+            transcription = None
+    else:
+        transcription = getattr(st.session_state, 'transcription', None)
+    
+    if transcription:
+        st.subheader("Transcription")
+        st.text_area("Modifier si nécessaire:", transcription, height=200, key="edited_transcription")
         
-        elif hasattr(st.session_state, 'extracted_info') and DOCX_AVAILABLE:
-            st.subheader("Informations Extraites")
-            st.json(st.session_state.extracted_info)
+        if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
+            edited_transcription = st.session_state.get("edited_transcription", transcription)
             
-            with st.spinner("Génération du document Word..."):
-                docx_data = fill_template_and_generate_docx(st.session_state.extracted_info, rapporteur, president)
+            if st.session_state.api_key:
+                with st.spinner("Extraction des informations avec Deepseek..."):
+                    extracted_info = extract_info(edited_transcription, st.session_state.api_key)
+                    if not extracted_info:
+                        extracted_info = extract_info_fallback(edited_transcription)
+            else:
+                st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
+                extracted_info = extract_info_fallback(edited_transcription)
             
-            if docx_data:
-                st.download_button(
-                    label="Télécharger les Notes de Réunion",
-                    data=docx_data,
-                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+            if extracted_info:
+                st.session_state.extracted_info = extracted_info
+                with st.spinner("Génération du document Word..."):
+                    docx_data = fill_template_and_generate_docx(extracted_info)
+                
+                if docx_data:
+                    meeting_title = extracted_info.get("meeting_title", "Réunion")
+                    meeting_date = extracted_info.get("date", datetime.now().strftime("%d/%m/%Y")).replace("/", "-")
+                    st.download_button(
+                        label="Télécharger les Notes de Réunion",
+                        data=docx_data,
+                        file_name=f"{meeting_title}_{meeting_date}_notes.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+    
+    elif hasattr(st.session_state, 'extracted_info') and DOCX_AVAILABLE:
+        with st.spinner("Génération du document Word..."):
+            docx_data = fill_template_and_generate_docx(st.session_state.extracted_info)
+        
+        if docx_data:
+            meeting_title = st.session_state.extracted_info.get("meeting_title", "Réunion")
+            meeting_date = st.session_state.extracted_info.get("date", datetime.now().strftime("%d/%m/%Y")).replace("/", "-")
+            st.download_button(
+                label="Télécharger les Notes de Réunion",
+                data=docx_data,
+                file_name=f"{meeting_title}_{meeting_date}_notes.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
 
 if __name__ == "__main__":
     try:
@@ -825,44 +746,29 @@ if __name__ == "__main__":
         
         st.title("Mode Secours")
         st.warning("Application en mode limité. La transcription audio n'est pas disponible.")
-        st.header("Détails de la Réunion")
-        meeting_title = st.text_input("Titre de la Réunion", value="Réunion", key="fallback_meeting_title")
-        meeting_date = st.date_input("Date de la Réunion", datetime.now(), key="fallback_meeting_date")
-        start_time = st.text_input("Heure de début (format HHhMMmin, ex: 07h00min)", value="Non spécifié", key="fallback_start_time")
-        end_time = st.text_input("Heure de fin (format HHhMMmin, ex: 10h34min)", value="Non spécifié", key="fallback_end_time")
-        attendees = st.text_area("Participants Présents (séparés par des virgules)", key="fallback_attendees")
-        absentees = st.text_area("Participants Absents (séparés par des virgules)", key="fallback_absentees")
-        rapporteur = st.text_input("Rapporteur", value="Non spécifié", key="fallback_rapporteur")
-        president = st.text_input("Président de Réunion", value="Non spécifié", key="fallback_president")
-        balance_amount = st.text_input("Solde du compte DRI Solidarité (en XAF, ex: 682040)", value="Non spécifié", key="fallback_balance_amount")
-        balance_date = st.date_input("Date du solde", value=meeting_date, key="fallback_balance_date")
+        st.header("Transcription")
         transcription = st.text_area("Transcription (saisie manuelle)", height=300, key="fallback_transcription")
         
         if st.button("Formater les Notes de Réunion"):
-            extracted_info = extract_info_fallback(
-                transcription,
-                meeting_title,
-                meeting_date.strftime("%d/%m/%Y"),
-                attendees,
-                absentees,
-                start_time=start_time,
-                end_time=end_time,
-                balance_amount=balance_amount,
-                balance_date=balance_date.strftime("%d/%m/%Y"),
-                rapporteur=rapporteur,
-                president=president
-            )
-            st.subheader("Informations Extraites")
-            st.json(extracted_info)
-            
-            try:
-                docx_data = fill_template_and_generate_docx(extracted_info, rapporteur, president)
-                if docx_data:
-                    st.download_button(
-                        label="Télécharger les Notes de Réunion",
-                        data=docx_data,
-                        file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
-            except Exception as e:
-                st.warning(f"Erreur lors de la génération du document: {e}")
+            if transcription:
+                extracted_info = extract_info_fallback(transcription)
+                st.subheader("Informations Extraites")
+                # Supprimer la clé 'transcription' pour l'affichage
+                display_info = {k: v for k, v in extracted_info.items() if k != "transcription"}
+                st.json(display_info)
+                
+                try:
+                    docx_data = fill_template_and_generate_docx(extracted_info)
+                    if docx_data:
+                        meeting_title = extracted_info.get("meeting_title", "Réunion")
+                        meeting_date = extracted_info.get("date", datetime.now().strftime("%d/%m/%Y")).replace("/", "-")
+                        st.download_button(
+                            label="Télécharger les Notes de Réunion",
+                            data=docx_data,
+                            file_name=f"{meeting_title}_{meeting_date}_notes.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+                except Exception as e:
+                    st.warning(f"Erreur lors de la génération du document: {e}")
+            else:
+                st.error("Veuillez entrer une transcription valide.")
