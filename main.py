@@ -52,19 +52,22 @@ def transcribe_audio(audio_file, file_extension, model_size="base"):
         st.error(f"Erreur lors de la transcription audio: {e}")
         return f"Erreur lors de la transcription audio: {e}"
 
-def extract_info(transcription, meeting_title, date, attendees, absentees, api_key):
+def extract_info(transcription, meeting_title, date, api_key):
     """Extract key information from the transcription using Deepseek API with an updated prompt"""
     prompt = f"""
     Vous êtes un assistant IA spécialisé dans la rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez les informations clés et retournez-les sous forme de JSON structuré en français. Les sections à extraire sont spécifiées ci-dessous. Gérez les ambiguïtés en inférant des détails raisonnables basés sur le contexte et excluez les informations non pertinentes ou peu claires.
 
     **Sections à extraire** :
-    - **presence_list** : Liste des participants présents et absents sous forme de chaîne (ex. "Présents : Alice, Bob\nAbsents : Charlie"). Si non trouvé, utilisez les valeurs fournies : Présents : {attendees}, Absents : {absentees}.
+    - **presence_list** : Liste des participants présents et absents sous forme de chaîne (ex. "Présents : Alice, Bob\nAbsents : Charlie"). Identifiez les noms mentionnés comme présents ou absents dans la transcription. Si non trouvé, utilisez "Présents : Non spécifié\nAbsents : Non spécifié".
+    - **agenda_items** : Liste des points de l'ordre du jour sous forme de chaîne (ex. "1. Relecture du compte rendu\n2. Résolutions"). Déduisez les points discutés ou explicitement mentionnés comme ordre du jour. Si non trouvé, utilisez "Non spécifié".
     - **resolutions_summary** : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). "date", "deadline" et "execution_date" doivent être au format DD/MM/YYYY. "report_count" est une chaîne (ex. "0").
     - **sanctions_summary** : Liste de sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status"). "date" doit être au format DD/MM/YYYY, "amount" est une chaîne.
-    - **start_time** : Heure de début de la réunion (format HHhMMmin, ex. 07h00min). Déduisez-la si possible, sinon utilisez "Non spécifié".
-    - **end_time** : Heure de fin de la réunion (format HHhMMmin, ex. 10h34min). Déduisez-la si possible, sinon utilisez "Non spécifié".
-    - **rapporteur** : Nom du rapporteur de la réunion. Déduisez-le si possible, sinon utilisez "Non spécifié".
-    - **president** : Nom du président de la réunion. Déduisez-le si possible, sinon utilisez "Non spécifié".
+    - **start_time** : Heure de début de la réunion (format HHhMMmin, ex. 07h00min). Déduisez-la si mentionnée, sinon utilisez "Non spécifié".
+    - **end_time** : Heure de fin de la réunion (format HHhMMmin, ex. 10h34min). Déduisez-la si mentionnée, sinon utilisez "Non spécifié".
+    - **rapporteur** : Nom du rapporteur de la réunion. Déduisez-le si mentionné, sinon utilisez "Non spécifié".
+    - **president** : Nom du président de la réunion. Déduisez-le si mentionné, sinon utilisez "Non spécifié".
+    - **balance_amount** : Solde du compte DRI Solidarité (ex. "827540"). Déduisez-le si mentionné, sinon utilisez "Non spécifié".
+    - **balance_date** : Date du solde (format DD/MM/YYYY). Déduisez-la si mentionnée, sinon utilisez la date fournie : {date}.
 
     **Instructions** :
     1. Pour chaque intervenant, identifiez ses contributions, résolutions et actions assignées.
@@ -99,12 +102,7 @@ def extract_info(transcription, meeting_title, date, attendees, absentees, api_k
             st.write(f"Réponse brute de Deepseek : {raw_response}")
             try:
                 extracted_data = json.loads(raw_response)
-                # Ensure the date field is included and matches the input
                 extracted_data["date"] = date
-                # Ensure agenda_items, balance_amount, and balance_date are included (will be overridden by user inputs if needed)
-                extracted_data["agenda_items"] = "Non spécifié"
-                extracted_data["balance_amount"] = "Non spécifié"
-                extracted_data["balance_date"] = date
                 return extracted_data
             except json.JSONDecodeError as e:
                 st.error(f"Erreur lors du parsing JSON : {e}")
@@ -116,61 +114,16 @@ def extract_info(transcription, meeting_title, date, attendees, absentees, api_k
         st.error(f"Erreur lors de l'extraction des informations : {e}")
         return None
 
-def extract_info_fallback(transcription, meeting_title, date, attendees, absentees, start_time="Non spécifié", end_time="Non spécifié", agenda_items=None, balance_amount="Non spécifié", balance_date=None):
+def extract_info_fallback(transcription, meeting_title, date):
     """Fallback mode for structuring information if Deepseek API fails"""
-    if agenda_items is None:
-        agenda_items = ["Non spécifié dans la transcription."]
-    if balance_date is None:
-        balance_date = date
-    
-    agenda_text = "\n".join([f"{item}" for item in agenda_items])
-    
-    # Combine attendees and absentees into presence_list
-    presence_list = f"Présents : {attendees if attendees else 'Non spécifié'}\nAbsents : {absentees if absentees else 'Non spécifié'}"
-    
-    # Extract start_time and end_time from transcription
-    start_time_match = re.search(r"a commencé à (\d{1,2}h\d{2})", transcription)
-    end_time_match = re.search(r"s'est terminée à (\d{1,2}h\d{2})", transcription)
-    start_time = start_time_match.group(1) + "min" if start_time_match else start_time
-    end_time = end_time_match.group(1) + "min" if end_time_match else end_time
-    
-    # Extract rapporteur and president (basic regex, can be improved based on transcription patterns)
-    rapporteur_match = re.search(r"Rapporteur : (.*?)(?:\n|$)", transcription)
-    president_match = re.search(r"Président de la réunion : (.*?)(?:\n|$)", transcription)
-    rapporteur = rapporteur_match.group(1) if rapporteur_match else "Non spécifié"
-    president = president_match.group(1) if president_match else "Non spécifié"
-    
-    # Extract resolutions from transcription
-    resolutions = []
-    resolutions_section = re.search(r"Résolutions prises :(.*?)(\n\nSanctions :|\n\nLe solde du compte|$)", transcription, re.DOTALL)
-    if resolutions_section:
-        resolution_lines = resolutions_section.group(1).strip().split("\n")
-        for line in resolution_lines:
-            match = re.match(r"- Sur (.*?): (.*?),\s*responsable (.*?),\s*statut (.*?),\s*(?:aucun report|nombre de reports (\d+))\.", line.strip())
-            if match:
-                dossier = match.group(1).strip()
-                resolution = match.group(2).strip()
-                responsible = match.group(3).strip()
-                status = match.group(4).strip()
-                report_count = "0" if "aucun report" in line else match.group(5)
-                
-                # Extract deadline from resolution text
-                deadline_match = re.search(r"(?:d'ici le|pour le|avant le)\s*(\d{1,2}/\d{1,2}/\d{4})", resolution)
-                deadline = deadline_match.group(1) if deadline_match else "Non spécifié"
-                
-                resolutions.append({
-                    "date": date,
-                    "dossier": dossier,
-                    "resolution": resolution,
-                    "responsible": responsible,
-                    "deadline": deadline,
-                    "execution_date": "",
-                    "status": status,
-                    "report_count": report_count
-                })
-    
-    if not resolutions:
-        resolutions = [{
+    # Initialize default values
+    extracted_data = {
+        "date": date,
+        "start_time": "Non spécifié",
+        "end_time": "Non spécifié",
+        "presence_list": "Présents : Non spécifié\nAbsents : Non spécifié",
+        "agenda_items": "Non spécifié",
+        "resolutions_summary": [{
             "date": date,
             "dossier": "Non spécifié",
             "resolution": "Non spécifié",
@@ -178,53 +131,101 @@ def extract_info_fallback(transcription, meeting_title, date, attendees, absente
             "deadline": "Non spécifié",
             "execution_date": "",
             "status": "En cours",
-            "report_count": "00"
-        }]
-    
-    # Extract sanctions from transcription
-    sanctions = []
-    sanctions_section = re.search(r"Sanctions :(.*?)(?:\n\nLe solde du compte|$)", transcription, re.DOTALL)
-    if sanctions_section:
-        sanction_lines = sanctions_section.group(1).strip().split("\n")
-        for line in sanction_lines:
-            match = re.match(r"- (.*?),\s*(.*?),\s*(\d+)\s*FCFA,\s*le (\d{1,2}/\d{1,2}/\d{4}),\s*(.*?)\.", line.strip())
-            if match:
-                name = match.group(1).strip()
-                reason = match.group(2).strip()
-                amount = match.group(3).strip()
-                sanction_date = match.group(4).strip()
-                status = match.group(5).strip()
-                sanctions.append({
-                    "name": name,
-                    "reason": reason,
-                    "amount": amount,
-                    "date": sanction_date,
-                    "status": status
-                })
-    
-    if not sanctions:
-        sanctions = [{
+            "report_count": "0"
+        }],
+        "sanctions_summary": [{
             "name": "Aucun",
             "reason": "Aucune sanction mentionnée",
             "amount": "0",
             "date": date,
             "status": "Non appliqué"
-        }]
-    
-    return {
-        "date": date,
-        "start_time": start_time,
-        "end_time": end_time,
-        "presence_list": presence_list,
-        "agenda_items": agenda_text,
-        "resolutions_summary": resolutions,
-        "sanctions_summary": sanctions,
-        "balance_amount": balance_amount,
-        "balance_date": balance_date,
-        "rapporteur": rapporteur,
-        "president": president,
+        }],
+        "balance_amount": "Non spécifié",
+        "balance_date": date,
+        "rapporteur": "Non spécifié",
+        "president": "Non spécifié",
         "transcription": transcription
     }
+
+    # Extract start_time and end_time
+    start_time_match = re.search(r"(?:a commencé à|début.*?\b)(\d{1,2}h\d{2})\b", transcription, re.IGNORECASE)
+    end_time_match = re.search(r"(?:s'est terminée à|fin.*?\b)(\d{1,2}h\d{2})\b", transcription, re.IGNORECASE)
+    if start_time_match:
+        extracted_data["start_time"] = start_time_match.group(1) + "min"
+    if end_time_match:
+        extracted_data["end_time"] = end_time_match.group(1) + "min"
+
+    # Extract presence_list
+    presence_match = re.search(r"(?:présents|présences)\s*:\s*([^.\n]+)", transcription, re.IGNORECASE)
+    absence_match = re.search(r"(?:absents|absences)\s*:\s*([^.\n]+)", transcription, re.IGNORECASE)
+    presents = presence_match.group(1).strip() if presence_match else "Non spécifié"
+    absents = absence_match.group(1).strip() if absence_match else "Non spécifié"
+    extracted_data["presence_list"] = f"Présents : {presents}\nAbsents : {absents}"
+
+    # Extract agenda_items
+    agenda_match = re.search(r"(?:ordre du jour|agenda)\s*:\s*([\s\S]*?)(?=\n\n|\Z)", transcription, re.IGNORECASE)
+    if agenda_match:
+        agenda_lines = [line.strip("- \t") for line in agenda_match.group(1).split("\n") if line.strip()]
+        extracted_data["agenda_items"] = "\n".join(agenda_lines) if agenda_lines else "Non spécifié"
+
+    # Extract rapporteur and president
+    rapporteur_match = re.search(r"rapporteur\s*:\s*([^.\n]+)", transcription, re.IGNORECASE)
+    president_match = re.search(r"(?:président|présidente)\s*(?:de\s*la\s*réunion)?\s*:\s*([^.\n]+)", transcription, re.IGNORECASE)
+    if rapporteur_match:
+        extracted_data["rapporteur"] = rapporteur_match.group(1).strip()
+    if president_match:
+        extracted_data["president"] = president_match.group(1).strip()
+
+    # Extract balance_amount and balance_date
+    balance_match = re.search(r"solde\s*(?:du compte)?\s*.*?(\d+(?:,\d{3})*)\s*(?:XAF|FCFA)?\s*(?:au|le)\s*(\d{1,2}/\d{1,2}/\d{4})", transcription, re.IGNORECASE)
+    if balance_match:
+        extracted_data["balance_amount"] = balance_match.group(1).replace(",", "")
+        extracted_data["balance_date"] = balance_match.group(2)
+
+    # Extract resolutions
+    resolutions_section = re.search(r"(?:résolutions prises|résolutions)\s*:(.*?)(?=\n\n(?:sanctions|le solde|$))", transcription, re.IGNORECASE | re.DOTALL)
+    if resolutions_section:
+        resolution_lines = resolutions_section.group(1).strip().split("\n")
+        resolutions = []
+        for line in resolution_lines:
+            match = re.match(r"-?\s*(?:sur\s*)?(.*?):\s*(.*?),\s*responsable\s*([^,]+),\s*statut\s*([^,]+),\s*(?:aucun report|nombre de reports\s*(\d+))\s*(?:d'ici le|pour le|avant le)?\s*(\d{1,2}/\d{1,2}/\d{4})?", line.strip(), re.IGNORECASE)
+            if match:
+                dossier, resolution, responsible, status = match.groups()[:4]
+                report_count = "0" if "aucun report" in line.lower() else match.group(5) if match.group(5) else "0"
+                deadline = match.group(6) if match.group(6) else "Non spécifié"
+                resolutions.append({
+                    "date": date,
+                    "dossier": dossier.strip() if dossier else "Non spécifié",
+                    "resolution": resolution.strip() if resolution else "Non spécifié",
+                    "responsible": responsible.strip() if responsible else "Non spécifié",
+                    "deadline": deadline,
+                    "execution_date": "",
+                    "status": status.strip() if status else "En cours",
+                    "report_count": report_count
+                })
+        if resolutions:
+            extracted_data["resolutions_summary"] = resolutions
+
+    # Extract sanctions
+    sanctions_section = re.search(r"sanctions\s*:(.*?)(?=\n\nle solde|$)", transcription, re.IGNORECASE | re.DOTALL)
+    if sanctions_section:
+        sanction_lines = sanctions_section.group(1).strip().split("\n")
+        sanctions = []
+        for line in sanction_lines:
+            match = re.match(r"-?\s*([^,]+),\s*([^,]+),\s*(\d+)\s*(?:FCFA|XAF),\s*le\s*(\d{1,2}/\d{1,2}/\d{4}),\s*([^.]+)", line.strip(), re.IGNORECASE)
+            if match:
+                name, reason, amount, sanction_date, status = match.groups()
+                sanctions.append({
+                    "name": name.strip() if name else "Aucun",
+                    "reason": reason.strip() if reason else "Aucune sanction mentionnée",
+                    "amount": amount.strip() if amount else "0",
+                    "date": sanction_date.strip() if sanction_date else date,
+                    "status": status.strip() if status else "Non appliqué"
+                })
+        if sanctions:
+            extracted_data["sanctions_summary"] = sanctions
+
+    return extracted_data
 
 def to_roman(num):
     """Convert an integer to a Roman numeral."""
@@ -260,7 +261,7 @@ def set_table_width(table, width_in_inches):
     table.width = table_width
     for row in table.rows:
         for cell in row.cells:
-            cell.width = table_width  # This ensures the table takes the specified width
+            cell.width = table_width
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
 def set_column_widths(table, widths_in_inches):
@@ -290,14 +291,10 @@ def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), 
     except KeyError:
         st.warning("Le style 'Table Grid' n'est pas disponible. Utilisation du style par défaut.")
     
-    # Set table width (default 6.5 inches, can be overridden)
     set_table_width(table, table_width)
-    
-    # Set column widths if provided
     if column_widths:
         set_column_widths(table, column_widths)
     
-    # Header row
     for j, header in enumerate(headers):
         cell = table.cell(0, j)
         cell.text = header
@@ -305,17 +302,14 @@ def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), 
         run.font.name = "Century"
         run.font.size = Pt(12)
         run.font.bold = True
-        run.font.color.rgb = RGBColor(*header_text_color)  # White text
-        set_cell_background(cell, header_bg_color)  # Black background
+        run.font.color.rgb = RGBColor(*header_text_color)
+        set_cell_background(cell, header_bg_color)
     
-    # Data rows with alternating background
     for i, row_data in enumerate(data):
         row = table.rows[i + 1]
-        # Apply gray background to even-numbered rows (0-based index, so i+1 is odd/even)
-        if (i + 1) % 2 == 0:  # Even rows (2, 4, etc.)
+        if (i + 1) % 2 == 0:
             for cell in row.cells:
                 set_cell_background(cell, alt_row_bg_color)
-        
         for j, cell_text in enumerate(row_data):
             cell = row.cells[j]
             cell.text = cell_text
@@ -329,29 +323,26 @@ def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14, box_width
     """Add text inside a single-cell table with a background color to simulate a centered box."""
     table = doc.add_table(rows=1, cols=1)
     table.style = "Table Grid"
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER  # Center the table on the page
-    set_table_width(table, box_width_in_inches)  # Set specific width for the box
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    set_table_width(table, box_width_in_inches)
     cell = table.cell(0, 0)
     cell.text = text
     paragraph = cell.paragraphs[0]
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER  # Center the text inside the cell
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = paragraph.runs[0]
     run.font.name = "Century"
-    run.font.size = Pt(font_size)  # Increased font size for bigger appearance
+    run.font.size = Pt(font_size)
     run.font.bold = True
     set_cell_background(cell, bg_color)
-    # Increase cell padding to make the box appear bigger
     set_cell_margins(cell, top=0.2, bottom=0.2, left=0.3, right=0.3)
     return table
 
-def fill_template_and_generate_docx(extracted_info, rapporteur, president):
+def fill_template_and_generate_docx(extracted_info):
     """Build the Word document from scratch using python-docx"""
     try:
-        # Create a new document
         doc = Document()
         
-        # Parse presence_list into lists of present and absent attendees
-        presence_list = extracted_info["presence_list"]
+        presence_list = extracted_info.get("presence_list", "Présents : Non spécifié\nAbsents : Non spécifié")
         present_attendees = []
         absent_attendees = []
         if "Présents :" in presence_list and "Absents :" in presence_list:
@@ -364,93 +355,86 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
                     absents = part.replace("Absents :", "").strip()
                     absent_attendees = [name.strip() for name in absents.split(",") if name.strip()]
         else:
-            present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Non spécifié" else ["Non spécifié"]
+            present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Non spécifié" else []
         
-        # Prepare agenda items as a list, adding Roman numerals only here
-        agenda_list = extracted_info["agenda_items"].split("\n") if extracted_info["agenda_items"] else ["Non spécifié"]
-        agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip()]
+        agenda_list = extracted_info.get("agenda_items", "Non spécifié").split("\n")
+        agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip() and item != "Non spécifié"]
+        if not agenda_list:
+            agenda_list = ["I. Non spécifié"]
         
-        # --- Header Section ---
-        # Add "Direction Recherches et Investissements" in a centered gray box
         add_text_in_box(
             doc,
             "Direction Recherches et Investissements",
-            bg_color=(192, 192, 192),  # Gray background
-            font_size=16,  # Increased font size for bigger appearance
-            box_width_in_inches=5.0  # Set width of the box
+            bg_color=(192, 192, 192),
+            font_size=16,
+            box_width_in_inches=5.0
         )
         
-        doc.add_paragraph()  # Spacer between gray box and title
+        doc.add_paragraph()
         
-        # Add "COMPTE RENDU DE REUNION HEBDOMADAIRE" in red
         add_styled_paragraph(
             doc,
             "COMPTE RENDU DE REUNION HEBDOMADAIRE",
             font_name="Century",
             font_size=12,
             bold=True,
-            color=RGBColor(192, 0, 0),  # #c00000
+            color=RGBColor(192, 0, 0),
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        # --- Date (in red, bold) ---
         add_styled_paragraph(
             doc,
-            extracted_info["date"],
+            extracted_info.get("date", ""),
             font_name="Century",
             font_size=12,
             bold=True,
-            color=RGBColor(192, 0, 0),  # #c00000
+            color=RGBColor(192, 0, 0),
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        # --- Start and End Time (centered, bold, no space between them) ---
         add_styled_paragraph(
             doc,
-            f"Heure de début : {extracted_info['start_time']}",
-            font_name="Century",
-            font_size=12,
-            bold=True,
-            alignment=WD_ALIGN_PARAGRAPH.CENTER
-        )
-        
-        # No spacer between Heure de début and Heure de fin
-        add_styled_paragraph(
-            doc,
-            f"Heure de fin : {extracted_info['end_time']}",
+            f"Heure de début : {extracted_info.get('start_time', 'Non spécifié')}",
             font_name="Century",
             font_size=12,
             bold=True,
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
         
-        # --- Rapporteur and President (centered, bold, only if specified) ---
-        rapporteur_to_use = extracted_info.get("rapporteur", rapporteur) or "Non spécifié"
-        president_to_use = extracted_info.get("president", president) or "Non spécifié"
+        add_styled_paragraph(
+            doc,
+            f"Heure de fin : {extracted_info.get('end_time', 'Non spécifié')}",
+            font_name="Century",
+            font_size=12,
+            bold=True,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
+        )
         
-        if rapporteur_to_use and rapporteur_to_use != "Non spécifié":
+        rapporteur = extracted_info.get("rapporteur", "Non spécifié")
+        president = extracted_info.get("president", "Non spécifié")
+        
+        if rapporteur != "Non spécifié":
             add_styled_paragraph(
                 doc,
-                f"Rapporteur : {rapporteur_to_use}",
+                f"Rapporteur : {rapporteur}",
                 font_name="Century",
                 font_size=12,
                 bold=True,
                 alignment=WD_ALIGN_PARAGRAPH.CENTER
             )
         
-        if president_to_use and president_to_use != "Non spécifié":
+        if president != "Non spécifié":
             add_styled_paragraph(
                 doc,
-                f"Président de Réunion : {president_to_use}",
+                f"Président de Réunion : {president}",
                 font_name="Century",
                 font_size=12,
                 bold=True,
                 alignment=WD_ALIGN_PARAGRAPH.CENTER
             )
         
-        doc.add_paragraph()  # Spacer after roles
+        doc.add_paragraph()
         
-        # --- Attendance Table (only if there are actual attendees or absentees) ---
         add_styled_paragraph(
             doc,
             "◆ LISTE DE PRÉSENCE/ABSENCE",
@@ -459,35 +443,39 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
             bold=True
         )
         
-        # Only add the table if there are actual attendees or absentees
-        if not (all(p == "Non spécifié" or p == "" for p in present_attendees) and all(a == "Non spécifié" or a == "" for a in absent_attendees)):
+        if present_attendees or absent_attendees:
             max_rows = max(len(present_attendees), len(absent_attendees))
             if max_rows == 0:
                 max_rows = 1
             attendance_data = []
             for i in range(max_rows):
-                present_text = present_attendees[i] if i < len(present_attendees) and present_attendees[i] != "Non spécifié" else ""
-                absent_text = absent_attendees[i] if i < len(absent_attendees) and absent_attendees[i] != "Non spécifié" else ""
+                present_text = present_attendees[i] if i < len(present_attendees) else ""
+                absent_text = absent_attendees[i] if i < len(absent_attendees) else ""
                 attendance_data.append([present_text, absent_text])
             
-            # Define column widths for the attendance table (total width = 6.5 inches)
-            attendance_column_widths = [3.25, 3.25]  # Equal widths for 2 columns
+            attendance_column_widths = [3.25, 3.25]
             add_styled_table(
                 doc,
                 rows=max_rows + 1,
                 cols=2,
                 headers=["PRÉSENCES", "ABSENCES"],
                 data=attendance_data,
-                header_bg_color=(0, 0, 0),  # Black background
-                header_text_color=(255, 255, 255),  # White text
-                alt_row_bg_color=(192, 192, 192),  # Gray for alternating rows
+                header_bg_color=(0, 0, 0),
+                header_text_color=(255, 255, 255),
+                alt_row_bg_color=(192, 192, 192),
                 column_widths=attendance_column_widths,
                 table_width=6.5
             )
+        else:
+            add_styled_paragraph(
+                doc,
+                "Aucune présence ou absence spécifiée.",
+                font_name="Century",
+                font_size=12
+            )
         
-        doc.add_paragraph()  # Spacer
+        doc.add_paragraph()
         
-        # --- Agenda Items ---
         add_styled_paragraph(
             doc,
             "◆ Ordre du jour",
@@ -504,21 +492,19 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
                 font_size=12
             )
         
-        # Add a page break after "Ordre du jour" to make it the last section on the page
         doc.add_page_break()
         
-        # --- Resolutions Table ---
         resolutions = extracted_info.get("resolutions_summary", [])
         if not resolutions:
             resolutions = [{
-                "date": extracted_info["date"],
+                "date": extracted_info.get("date", ""),
                 "dossier": "Non spécifié",
                 "resolution": "Non spécifié",
                 "responsible": "Non spécifié",
                 "deadline": "Non spécifié",
                 "execution_date": "",
                 "status": "En cours",
-                "report_count": "00"
+                "report_count": "0"
             }]
         
         add_styled_paragraph(
@@ -527,7 +513,7 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
             font_name="Century",
             font_size=12,
             bold=True,
-            color=RGBColor(192, 0, 0)  # #c00000
+            color=RGBColor(192, 0, 0)
         )
         
         resolutions_headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
@@ -545,31 +531,29 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
             ]
             resolutions_data.append(row_data)
         
-        # Define column widths for the resolutions table (total width = 7.5 inches, wider)
-        resolutions_column_widths = [0.9, 1.2, 1.8, 0.8, 1.2, 0.9, 0.8, 0.9]  # Adjusted proportionally for 7.5 inches
+        resolutions_column_widths = [0.9, 1.2, 1.8, 0.8, 1.2, 0.9, 0.8, 0.9]
         add_styled_table(
             doc,
             rows=len(resolutions) + 1,
             cols=8,
             headers=resolutions_headers,
             data=resolutions_data,
-            header_bg_color=(0, 0, 0),  # Black background
-            header_text_color=(255, 255, 255),  # White text
-            alt_row_bg_color=(192, 192, 192),  # Gray for alternating rows
+            header_bg_color=(0, 0, 0),
+            header_text_color=(255, 255, 255),
+            alt_row_bg_color=(192, 192, 192),
             column_widths=resolutions_column_widths,
-            table_width=7.5  # Wider table
+            table_width=7.5
         )
         
-        doc.add_paragraph()  # Spacer
+        doc.add_paragraph()
         
-        # --- Sanctions Table ---
         sanctions = extracted_info.get("sanctions_summary", [])
         if not sanctions:
             sanctions = [{
                 "name": "Aucun",
                 "reason": "Aucune sanction mentionnée",
                 "amount": "0",
-                "date": extracted_info["date"],
+                "date": extracted_info.get("date", ""),
                 "status": "Non appliqué"
             }]
         
@@ -579,7 +563,7 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
             font_name="Century",
             font_size=12,
             bold=True,
-            color=RGBColor(192, 0, 0)  # #c00000
+            color=RGBColor(192, 0, 0)
         )
         
         sanctions_headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
@@ -594,32 +578,29 @@ def fill_template_and_generate_docx(extracted_info, rapporteur, president):
             ]
             sanctions_data.append(row_data)
         
-        # Define column widths for the sanctions table (total width = 7.5 inches, wider)
-        sanctions_column_widths = [1.5, 1.8, 1.4, 1.2, 1.6]  # Adjusted proportionally for 7.5 inches
+        sanctions_column_widths = [1.5, 1.8, 1.4, 1.2, 1.6]
         add_styled_table(
             doc,
             rows=len(sanctions) + 1,
             cols=5,
             headers=sanctions_headers,
             data=sanctions_data,
-            header_bg_color=(0, 0, 0),  # Black background
-            header_text_color=(255, 255, 255),  # White text
-            alt_row_bg_color=(192, 192, 192),  # Gray for alternating rows
+            header_bg_color=(0, 0, 0),
+            header_text_color=(255, 255, 255),
+            alt_row_bg_color=(192, 192, 192),
             column_widths=sanctions_column_widths,
-            table_width=7.5  # Wider table
+            table_width=7.5
         )
         
-        doc.add_paragraph()  # Spacer
+        doc.add_paragraph()
         
-        # --- Balance Info ---
         add_styled_paragraph(
             doc,
-            f"Le solde du compte DRI Solidarité (00001-00921711101-10) est de XAF {extracted_info['balance_amount']} au {extracted_info['balance_date']}.",
+            f"Le solde du compte DRI Solidarité (00001-00921711101-10) est de XAF {extracted_info.get('balance_amount', 'Non spécifié')} au {extracted_info.get('balance_date', '')}.",
             font_name="Century",
             font_size=12
         )
         
-        # Save the document
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             doc.save(tmp.name)
             with open(tmp.name, "rb") as f:
@@ -680,8 +661,7 @@ def main():
         )
         
         st.header("Paramètres API Deepseek")
-        api_key = st.text_input("Clé API Deepseek", value=st.session_state.api_key, type="password")
-        st.session_state.api_key = api_key
+        st.session_state.api_key = st.text_input("Clé API Deepseek", value=st.session_state.api_key, type="password")
         
         if uploaded_file is not None:
             file_extension = uploaded_file.name.split('.')[-1].lower()
@@ -699,43 +679,49 @@ def main():
         st.header("Détails de la Réunion")
         meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
         meeting_date = st.date_input("Date de la Réunion", datetime.now())
-        start_time = st.text_input("Heure de début (format HHhMMmin, ex: 07h00min)", value="07h00min")
-        end_time = st.text_input("Heure de fin (format HHhMMmin, ex: 10h34min)", value="10h34min")
-        attendees = st.text_area("Participants Présents (séparés par des virgules)")
-        absentees = st.text_area("Participants Absents (séparés par des virgules)")
-        rapporteur = st.text_input("Rapporteur")
-        president = st.text_input("Président de Réunion")
+        
+        # Placeholder for extracted data
+        if 'extracted_info' in st.session_state:
+            extracted_info = st.session_state.extracted_info
+            default_presence = extracted_info.get("presence_list", "Présents : Non spécifié\nAbsents : Non spécifié")
+            default_agenda = extracted_info.get("agenda_items", "Non spécifié")
+            default_start_time = extracted_info.get("start_time", "Non spécifié")
+            default_end_time = extracted_info.get("end_time", "Non spécifié")
+            default_rapporteur = extracted_info.get("rapporteur", "Non spécifié")
+            default_president = extracted_info.get("president", "Non spécifié")
+            default_balance_amount = extracted_info.get("balance_amount", "Non spécifié")
+            default_balance_date = extracted_info.get("balance_date", meeting_date.strftime("%d/%m/%Y"))
+        else:
+            default_presence = "Présents : Non spécifié\nAbsents : Non spécifié"
+            default_agenda = "Non spécifié"
+            default_start_time = "Non spécifié"
+            default_end_time = "Non spécifié"
+            default_rapporteur = "Non spécifié"
+            default_president = "Non spécifié"
+            default_balance_amount = "Non spécifié"
+            default_balance_date = meeting_date.strftime("%d/%m/%Y")
+        
+        st.subheader("Liste de Présence/Absence")
+        presence_list = st.text_area("Présents et Absents (format: Présents : Nom1, Nom2\nAbsents : Nom3)", value=default_presence, height=100)
         
         st.subheader("Ordre du Jour")
-        agenda_items_container = st.container()
-        if 'agenda_items' not in st.session_state:
-            st.session_state.agenda_items = [""]
+        agenda_items = st.text_area("Points de l'ordre du jour (un par ligne)", value=default_agenda, height=150)
         
-        with agenda_items_container:
-            new_agenda_items = []
-            for i, item in enumerate(st.session_state.agenda_items):
-                cols = st.columns([0.9, 0.1])
-                with cols[0]:
-                    new_item = st.text_input(f"Point", item, key=f"agenda_item_{i}")
-                with cols[1]:
-                    if st.button("𝗫", key=f"del_agenda_{i}"):
-                        pass
-                    else:
-                        new_agenda_items.append(new_item)
-            st.session_state.agenda_items = new_agenda_items if new_agenda_items else [""]
+        st.subheader("Horaires")
+        start_time = st.text_input("Heure de début (format HHhMMmin)", value=default_start_time)
+        end_time = st.text_input("Heure de fin (format HHhMMmin)", value=default_end_time)
         
-        if st.button("Ajouter un Point à l'Ordre du Jour"):
-            st.session_state.agenda_items.append("")
-            st.rerun()
+        st.subheader("Rôles")
+        rapporteur = st.text_input("Rapporteur", value=default_rapporteur)
+        president = st.text_input("Président de Réunion", value=default_president)
         
         st.subheader("Solde du Compte DRI Solidarité")
-        balance_amount = st.text_input("Solde (en XAF, ex: 682040)", value="682040")
-        balance_date = st.date_input("Date du solde", value=meeting_date)
+        balance_amount = st.text_input("Solde (en XAF)", value=default_balance_amount)
+        balance_date = st.date_input("Date du solde", value=datetime.strptime(default_balance_date, "%d/%m/%Y") if default_balance_date != "Non spécifié" else meeting_date)
     
     with col2:
         st.header("Transcription & Sortie")
         
-        # Handle the transcription source
         if transcribe_button and WHISPER_AVAILABLE and uploaded_file is not None:
             with st.spinner(f"Transcription audio avec le modèle Whisper {whisper_model}..."):
                 transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
@@ -754,14 +740,12 @@ def main():
         else:
             transcription = getattr(st.session_state, 'transcription', None)
         
-        # Display and process the transcription
         if transcription:
             st.subheader("Transcription")
             st.text_area("Modifier si nécessaire:", transcription, height=200, key="edited_transcription")
             
             if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
                 edited_transcription = st.session_state.get("edited_transcription", transcription)
-                agenda_items = [item for item in st.session_state.agenda_items if item.strip()]
                 
                 if st.session_state.api_key:
                     with st.spinner("Extraction des informations avec Deepseek..."):
@@ -769,47 +753,40 @@ def main():
                             edited_transcription,
                             meeting_title,
                             meeting_date.strftime("%d/%m/%Y"),
-                            attendees,
-                            absentees,
                             st.session_state.api_key
                         )
                         if not extracted_info:
                             extracted_info = extract_info_fallback(
                                 edited_transcription,
                                 meeting_title,
-                                meeting_date.strftime("%d/%m/%Y"),
-                                attendees,
-                                absentees,
-                                start_time,
-                                end_time,
-                                agenda_items,
-                                balance_amount,
-                                balance_date.strftime("%d/%m/%Y")
+                                meeting_date.strftime("%d/%m/%Y")
                             )
-                        else:
-                            # Override with user inputs where appropriate
-                            extracted_info["start_time"] = start_time if start_time else extracted_info.get("start_time", "Non spécifié")
-                            extracted_info["end_time"] = end_time if end_time else extracted_info.get("end_time", "Non spécifié")
-                            extracted_info["agenda_items"] = "\n".join([f"{item}" for item in agenda_items]) if agenda_items else extracted_info.get("agenda_items", "Non spécifié")
-                            extracted_info["balance_amount"] = balance_amount
-                            extracted_info["balance_date"] = balance_date.strftime("%d/%m/%Y")
-                            # Use user inputs for rapporteur and president if provided
-                            extracted_info["rapporteur"] = rapporteur if rapporteur else extracted_info.get("rapporteur", "Non spécifié")
-                            extracted_info["president"] = president if president else extracted_info.get("president", "Non spécifié")
                 else:
                     st.warning("Aucune clé API Deepseek fournie. Utilisation du mode de secours.")
                     extracted_info = extract_info_fallback(
                         edited_transcription,
                         meeting_title,
-                        meeting_date.strftime("%d/%m/%Y"),
-                        attendees,
-                        absentees,
-                        start_time,
-                        end_time,
-                        agenda_items,
-                        balance_amount,
-                        balance_date.strftime("%d/%m/%Y")
+                        meeting_date.strftime("%d/%m/%Y")
                     )
+                
+                # Override with UI inputs only if they differ from defaults
+                if extracted_info:
+                    if presence_list != default_presence:
+                        extracted_info["presence_list"] = presence_list
+                    if agenda_items != default_agenda:
+                        extracted_info["agenda_items"] = agenda_items
+                    if start_time != default_start_time:
+                        extracted_info["start_time"] = start_time
+                    if end_time != default_end_time:
+                        extracted_info["end_time"] = end_time
+                    if rapporteur != default_rapporteur:
+                        extracted_info["rapporteur"] = rapporteur
+                    if president != default_president:
+                        extracted_info["president"] = president
+                    if balance_amount != default_balance_amount:
+                        extracted_info["balance_amount"] = balance_amount
+                    if balance_date.strftime("%d/%m/%Y") != default_balance_date:
+                        extracted_info["balance_date"] = balance_date.strftime("%d/%m/%Y")
                 
                 if extracted_info:
                     st.session_state.extracted_info = extracted_info
@@ -817,7 +794,7 @@ def main():
                     st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
                     
                     with st.spinner("Génération du document Word..."):
-                        docx_data = fill_template_and_generate_docx(extracted_info, extracted_info["rapporteur"], extracted_info["president"])
+                        docx_data = fill_template_and_generate_docx(extracted_info)
                     
                     if docx_data:
                         st.download_button(
@@ -828,17 +805,18 @@ def main():
                         )
         
         elif hasattr(st.session_state, 'extracted_info') and DOCX_AVAILABLE:
+            extracted_info = st.session_state.extracted_info
             st.subheader("Informations Extraites")
-            st.text_area("Aperçu:", json.dumps(st.session_state.extracted_info, indent=2, ensure_ascii=False), height=300)
+            st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
             
             with st.spinner("Génération du document Word..."):
-                docx_data = fill_template_and_generate_docx(st.session_state.extracted_info, st.session_state.extracted_info["rapporteur"], st.session_state.extracted_info["president"])
+                docx_data = fill_template_and_generate_docx(extracted_info)
             
             if docx_data:
                 st.download_button(
                     label="Télécharger les Notes de Réunion",
                     data=docx_data,
-                    file_name=f"{meeting_title}_{datetime.now().strftime('%Y-%m-%d')}_notes.docx",
+                    file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
 
@@ -874,13 +852,13 @@ if __name__ == "__main__":
         st.header("Détails de la Réunion")
         meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
         meeting_date = st.date_input("Date de la Réunion", datetime.now())
-        start_time = st.text_input("Heure de début (format HHhMMmin, ex: 07h00min)", value="07h00min")
-        end_time = st.text_input("Heure de fin (format HHhMMmin, ex: 10h34min)", value="10h34min")
-        attendees = st.text_area("Participants Présents (séparés par des virgules)")
-        absentees = st.text_area("Participants Absents (séparés par des virgules)")
-        rapporteur = st.text_input("Rapporteur")
-        president = st.text_input("Président de Réunion")
-        balance_amount = st.text_input("Solde du compte DRI Solidarité (en XAF, ex: 682040)", value="682040")
+        presence_list = st.text_area("Présents et Absents (format: Présents : Nom1, Nom2\nAbsents : Nom3)", value="Présents : Non spécifié\nAbsents : Non spécifié")
+        agenda_items = st.text_area("Points de l'ordre du jour (un par ligne)", value="Non spécifié")
+        start_time = st.text_input("Heure de début (format HHhMMmin)", value="Non spécifié")
+        end_time = st.text_input("Heure de fin (format HHhMMmin)", value="Non spécifié")
+        rapporteur = st.text_input("Rapporteur", value="Non spécifié")
+        president = st.text_input("Président de Réunion", value="Non spécifié")
+        balance_amount = st.text_input("Solde du compte DRI Solidarité (en XAF)", value="Non spécifié")
         balance_date = st.date_input("Date du solde", value=meeting_date)
         transcription = st.text_area("Transcription (saisie manuelle)", height=300)
         
@@ -888,19 +866,22 @@ if __name__ == "__main__":
             extracted_info = extract_info_fallback(
                 transcription,
                 meeting_title,
-                meeting_date.strftime("%d/%m/%Y"),
-                attendees,
-                absentees,
-                start_time=start_time,
-                end_time=end_time,
-                balance_amount=balance_amount,
-                balance_date=balance_date.strftime("%d/%m/%Y")
+                meeting_date.strftime("%d/%m/%Y")
             )
+            extracted_info["presence_list"] = presence_list
+            extracted_info["agenda_items"] = agenda_items
+            extracted_info["start_time"] = start_time
+            extracted_info["end_time"] = end_time
+            extracted_info["rapporteur"] = rapporteur
+            extracted_info["president"] = president
+            extracted_info["balance_amount"] = balance_amount
+            extracted_info["balance_date"] = balance_date.strftime("%d/%m/%Y")
+            
             st.subheader("Informations Extraites")
             st.text_area("Aperçu:", json.dumps(extracted_info, indent=2, ensure_ascii=False), height=300)
             
             try:
-                docx_data = fill_template_and_generate_docx(extracted_info, rapporteur, president)
+                docx_data = fill_template_and_generate_docx(extracted_info)
                 if docx_data:
                     st.download_button(
                         label="Télécharger les Notes de Réunion",
