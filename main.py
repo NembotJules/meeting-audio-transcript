@@ -55,20 +55,27 @@ def transcribe_audio(audio_file, file_extension, model_size="base"):
 def extract_info(transcription, meeting_title, date, attendees, absentees, api_key):
     """Extract key information from the transcription using Deepseek API with an updated prompt"""
     prompt = f"""
-    Vous êtes un expert en rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez les points suivants et retournez les informations sous forme de JSON structuré :
+    Vous êtes un assistant IA spécialisé dans la rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez les informations clés et retournez-les sous forme de JSON structuré en français. Les sections à extraire sont spécifiées ci-dessous. Gérez les ambiguïtés en inférant des détails raisonnables basés sur le contexte et excluez les informations non pertinentes ou peu claires.
 
-    - "presence_list" : Liste des participants présents et absents (chaîne de texte, par exemple "Présents : Alice, Bob\nAbsents : Charlie"). Si non trouvé, utilisez les valeurs fournies : Présents : {attendees}, Absents : {absentees}.
-    - "resolutions_summary" : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). Le champ "date" doit être au format DD/MM/YYYY, "deadline" et "execution_date" également si présents. "report_count" doit être une chaîne (par exemple "0").
-    - "sanctions_summary" : Liste de sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status"). Le champ "date" doit être au format DD/MM/YYYY, "amount" doit être une chaîne.
-    - "start_time" : L'heure de début de la réunion (format HHhMMmin, par exemple 07h00min). Déduisez-la si possible, sinon utilisez "Non spécifié".
-    - "end_time" : L'heure de fin de la réunion (format HHhMMmin, par exemple 10h34min). Déduisez-la si possible, sinon utilisez "Non spécifié".
-    - "rapporteur" : Le nom du rapporteur de la réunion. Déduisez-le si possible, sinon utilisez "Non spécifié".
-    - "president" : Le nom du président de la réunion. Déduisez-le si possible, sinon utilisez "Non spécifié".
+    **Sections à extraire** :
+    - **presence_list** : Liste des participants présents et absents sous forme de chaîne (ex. "Présents : Alice, Bob\nAbsents : Charlie"). Si non trouvé, utilisez les valeurs fournies : Présents : {attendees}, Absents : {absentees}.
+    - **resolutions_summary** : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). "date", "deadline" et "execution_date" doivent être au format DD/MM/YYYY. "report_count" est une chaîne (ex. "0").
+    - **sanctions_summary** : Liste de sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status"). "date" doit être au format DD/MM/YYYY, "amount" est une chaîne.
+    - **start_time** : Heure de début de la réunion (format HHhMMmin, ex. 07h00min). Déduisez-la si possible, sinon utilisez "Non spécifié".
+    - **end_time** : Heure de fin de la réunion (format HHhMMmin, ex. 10h34min). Déduisez-la si possible, sinon utilisez "Non spécifié".
+    - **rapporteur** : Nom du rapporteur de la réunion. Déduisez-le si possible, sinon utilisez "Non spécifié".
+    - **president** : Nom du président de la réunion. Déduisez-le si possible, sinon utilisez "Non spécifié".
 
-    Transcription :
+    **Instructions** :
+    1. Pour chaque intervenant, identifiez ses contributions, résolutions et actions assignées.
+    2. Si une information n’est pas trouvée, utilisez des valeurs par défaut raisonnables (ex. "Non spécifié" ou la date fournie : {date}).
+    3. Assurez-vous que le JSON est bien formé et que toutes les dates respectent le format DD/MM/YYYY.
+    4. Priorisez les informations claires et exploitables, en évitant les détails non pertinents.
+
+    **Transcription** :
     {transcription}
 
-    Retournez le résultat sous forme de JSON structuré, en français. Si une information n'est pas trouvée dans la transcription, utilisez des valeurs par défaut raisonnables (par exemple, "Non spécifié" ou la date fournie : {date}). Assurez-vous que le JSON est bien formé.
+    Retournez le résultat sous forme de JSON structuré, en français.
     """
     
     try:
