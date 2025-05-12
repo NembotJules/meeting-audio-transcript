@@ -83,7 +83,7 @@ def extract_context_from_report(file, mistral_api_key):
                 document=document
             )
             context = ""
-            for block in ocr_response.blocks:
+            for block in ocr_response.keys:
                 if block.type == "text":
                     context += block.text + "\n"
             return context.strip()
@@ -408,14 +408,6 @@ def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14, box_width
 
 def fill_template_and_generate_docx(extracted_info):
     """Build the Word document from scratch using python-docx"""
-    from docx import Document
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml.ns import qn
-    from docx.shared import Pt, RGBColor
-    import tempfile
-    import os
-    import streamlit as st
-
     try:
         doc = Document()
 
@@ -437,24 +429,20 @@ def fill_template_and_generate_docx(extracted_info):
 
         # Process agenda items
         agenda_list = extracted_info.get("agenda_items", "Non spécifié").split("\n")
-        agenda_list = [f"{idx}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip() and item != "Non spécifié"]
+        agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip() and item != "Non spécifié"]
         if not agenda_list:
-            agenda_list = ["1. Non spécifié"]
+            agenda_list = ["I. Non spécifié"]
 
-        # Add document content with proper styling
-        def add_styled_paragraph(doc, text, font_name="Century", font_size=12, bold=False, color=None, alignment=None):
-            p = doc.add_paragraph()
-            run = p.add_run(text)
-            run.font.name = font_name
-            run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
-            run.font.size = Pt(font_size)
-            run.bold = bold
-            if color:
-                run.font.color.rgb = color
-            if alignment:
-                p.alignment = alignment
+        # Add header box
+        add_text_in_box(
+            doc,
+            "Direction Recherches et Investissements",
+            bg_color=(192, 192, 192),
+            font_size=16,
+            box_width_in_inches=5.0
+        )
 
-        # Header and title
+        # Add meeting title
         add_styled_paragraph(
             doc,
             "COMPTE RENDU DE REUNION HEBDOMADAIRE",
@@ -465,7 +453,7 @@ def fill_template_and_generate_docx(extracted_info):
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
 
-        # Date, start time, end time
+        # Add date
         add_styled_paragraph(
             doc,
             extracted_info.get("date", ""),
@@ -475,6 +463,8 @@ def fill_template_and_generate_docx(extracted_info):
             color=RGBColor(192, 0, 0),
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
+
+        # Add start and end times
         add_styled_paragraph(
             doc,
             f"Heure de début : {extracted_info.get('start_time', 'Non spécifié')}",
@@ -492,7 +482,7 @@ def fill_template_and_generate_docx(extracted_info):
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
 
-        # Rapporteur and President
+        # Add rapporteur and president
         rapporteur = extracted_info.get("rapporteur", "Non spécifié")
         president = extracted_info.get("president", "Non spécifié")
         if rapporteur != "Non spécifié":
@@ -514,6 +504,162 @@ def fill_template_and_generate_docx(extracted_info):
                 alignment=WD_ALIGN_PARAGRAPH.CENTER
             )
 
+        # Add attendance table
+        add_styled_paragraph(
+            doc,
+            "◆ LISTE DE PRÉSENCE/ABSENCE",
+            font_name="Century",
+            font_size=12,
+            bold=True
+        )
+
+        if present_attendees or absent_attendees:
+            max_rows = max(len(present_attendees), len(absent_attendees))
+            if max_rows == 0:
+                max_rows = 1
+            attendance_data = []
+            for i in range(max_rows):
+                present_text = present_attendees[i] if i < len(present_attendees) else ""
+                absent_text = absent_attendees[i] if i < len(absent_attendees) else ""
+                attendance_data.append([present_text, absent_text])
+            
+            attendance_column_widths = [3.25, 3.25]
+            add_styled_table(
+                doc,
+                rows=max_rows + 1,
+                cols=2,
+                headers=["PRÉSENCES", "ABSENCES"],
+                data=attendance_data,
+                header_bg_color=(0, 0, 0),
+                header_text_color=(255, 255, 255),
+                alt_row_bg_color=(192, 192, 192),
+                column_widths=attendance_column_widths,
+                table_width=6.5
+            )
+        else:
+            add_styled_paragraph(
+                doc,
+                "Aucune présence ou absence spécifiée.",
+                font_name="Century",
+                font_size=12
+            )
+
+        # Add agenda items
+        add_styled_paragraph(
+            doc,
+            "◆ Ordre du jour",
+            font_name="Century",
+            font_size=12,
+            bold=True
+        )
+        for item in agenda_list:
+            add_styled_paragraph(
+                doc,
+                item,
+                font_name="Century",
+                font_size=12
+            )
+
+        # Add resolutions summary
+        resolutions = extracted_info.get("resolutions_summary", [])
+        if not resolutions:
+            resolutions = [{
+                "date": extracted_info.get("date", ""),
+                "dossier": "Non spécifié",
+                "resolution": "Non spécifié",
+                "responsible": "Non spécifié",
+                "deadline": "Non spécifié",
+                "execution_date": "",
+                "status": "En cours",
+                "report_count": "0"
+            }]
+        add_styled_paragraph(
+            doc,
+            "RÉCAPITULATIF DES RÉSOLUTIONS",
+            font_name="Century",
+            font_size=12,
+            bold=True,
+            color=RGBColor(192, 0, 0)
+        )
+        resolutions_headers = ["DATE", "DOSSIERS", "RÉSOLUTIONS", "RESP.", "DÉLAI D'EXÉCUTION", "DATE D'EXÉCUTION", "STATUT", "NBR DE REPORT"]
+        resolutions_data = []
+        for resolution in resolutions:
+            row_data = [
+                resolution.get("date", ""),
+                resolution.get("dossier", ""),
+                resolution.get("resolution", ""),
+                resolution.get("responsible", ""),
+                resolution.get("deadline", ""),
+                resolution.get("execution_date", ""),
+                resolution.get("status", ""),
+                str(resolution.get("report_count", ""))
+            ]
+            resolutions_data.append(row_data)
+        resolutions_column_widths = [0.9, 1.2, 1.8, 0.8, 1.2, 0.9, 0.8, 0.9]
+        add_styled_table(
+            doc,
+            rows=len(resolutions) + 1,
+            cols=8,
+            headers=resolutions_headers,
+            data=resolutions_data,
+            header_bg_color=(0, 0, 0),
+            header_text_color=(255, 255, 255),
+            alt_row_bg_color=(192, 192, 192),
+            column_widths=resolutions_column_widths,
+            table_width=7.5
+        )
+
+        # Add sanctions summary
+        sanctions = extracted_info.get("sanctions_summary", [])
+        if not sanctions:
+            sanctions = [{
+                "name": "Aucun",
+                "reason": "Aucune sanction mentionnée",
+                "amount": "0",
+                "date": extracted_info.get("date", ""),
+                "status": "Non appliqué"
+            }]
+        add_styled_paragraph(
+            doc,
+            "RÉCAPITULATIF DES SANCTIONS",
+            font_name="Century",
+            font_size=12,
+            bold=True,
+            color=RGBColor(192, 0, 0)
+        )
+        sanctions_headers = ["NOM", "MOTIF", "MONTANT (FCFA)", "DATE", "STATUT"]
+        sanctions_data = []
+        for sanction in sanctions:
+            row_data = [
+                sanction.get("name", ""),
+                sanction.get("reason", ""),
+                sanction.get("amount", ""),
+                sanction.get("date", ""),
+                sanction.get("status", "")
+            ]
+            sanctions_data.append(row_data)
+        sanctions_column_widths = [1.5, 1.8, 1.4, 1.2, 1.6]
+        add_styled_table(
+            doc,
+            rows=len(sanctions) + 1,
+            cols=5,
+            headers=sanctions_headers,
+            data=sanctions_data,
+            header_bg_color=(0, 0, 0),
+            header_text_color=(255, 255, 255),
+            alt_row_bg_color=(192, 192, 192),
+            column_widths=sanctions_column_widths,
+            table_width=7.5
+        )
+
+        # Add balance information
+        add_styled_paragraph(
+            doc,
+            f"Le solde du compte DRI Solidarité (00001-00921711101-10) est de XAF {extracted_info.get('balance_amount', 'Non spécifié')} au {extracted_info.get('balance_date', '')}.",
+            font_name="Century",
+            font_size=12
+        )
+
         # Save the document to a temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             doc.save(tmp.name)
@@ -525,3 +671,12 @@ def fill_template_and_generate_docx(extracted_info):
     except Exception as e:
         st.error(f"Erreur lors de la génération du document Word : {e}")
         return None
+
+def main():
+    st.title("Outil de Transcription de Réunion")
+    # Your main application logic here
+    # This is where you'd handle user inputs, call the transcription, and generate the document
+    pass
+
+if __name__ == "__main__":
+    main()
