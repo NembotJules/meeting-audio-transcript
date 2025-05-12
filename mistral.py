@@ -27,7 +27,7 @@ messages = [
         "content": [
             {
                 "type": "text",
-                "text": "what is the last sentence in the document"
+                "text": "Sur quoi travaille Jules Nembot?"
             },
             {
                 "type": "document_url",
