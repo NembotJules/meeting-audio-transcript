@@ -27,7 +27,7 @@ messages = [
         "content": [
             {
                 "type": "text",
-                "text": "Sur quoi travaille Jules Nembot?"
+                "text": "J'ai besoin de savoir la revue d'activités des employés de la banque"
             },
             {
                 "type": "document_url",
