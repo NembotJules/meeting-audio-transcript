@@ -85,10 +85,11 @@ def main():
     st.sidebar.header("Previous Context")
     previous_report = st.sidebar.file_uploader("Upload Previous Report (optional)", type=["docx"])
     if previous_report:
-        with st.sidebar.spinner("Extracting context..."):
-            context = extract_context_from_report(previous_report)
-            st.session_state.previous_context = context
-        st.sidebar.success("Context extracted successfully!")
+        status_text = st.sidebar.empty()
+        status_text.text("Extracting context...")
+        context = extract_context_from_report(previous_report)
+        status_text.text("Context extracted successfully!")
+        st.session_state.previous_context = context
     else:
         st.session_state.previous_context = ""
 
@@ -96,7 +97,7 @@ def main():
     st.sidebar.subheader("Test the Context")
     question = st.sidebar.text_input("Ask a question about the previous context:")
     if st.sidebar.button("Get Answer") and question and 'previous_context' in st.session_state:
-        with st.sidebar.spinner("Generating answer..."):
+        with st.spinner("Generating answer..."):
             answer = answer_question_with_context(question, st.session_state.previous_context, st.session_state.api_key)
         st.sidebar.write("**Answer:**", answer)
 
