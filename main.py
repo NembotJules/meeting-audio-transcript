@@ -16,7 +16,6 @@ import torchaudio
 import json
 import re
 
-# Suppression des avertissements pour un affichage plus propre
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Outil de Transcription de Réunion", page_icon=":microphone:", layout="wide")
@@ -52,33 +51,49 @@ def transcribe_audio(audio_file, file_extension, model_size="base"):
         st.error(f"Erreur lors de la transcription audio: {e}")
         return f"Erreur lors de la transcription audio: {e}"
 
-def extract_info(transcription, meeting_title, date, api_key):
-    """Extract key information from the transcription using Deepseek API with an updated prompt"""
+def extract_context_from_report(docx_file):
+    """Extract relevant context from the previous meeting's report"""
+    try:
+        doc = Document(docx_file)
+        context = ""
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if "RÉCAPITULATIF DES RÉSOLUTIONS" in text or "Ordre du Jour" in text:
+                context += text + "\n"
+        return context.strip() if context else "Aucun contexte pertinent trouvé."
+    except Exception as e:
+        st.error(f"Erreur lors de l'extraction du contexte: {e}")
+        return "Erreur lors de l'extraction du contexte."
+
+def extract_info(transcription, meeting_title, date, api_key, previous_context=""):
+    """Extract key information from the transcription using Deepseek API with previous context"""
     prompt = f"""
-    Vous êtes un assistant IA spécialisé dans la rédaction de comptes rendus de réunion. À partir de la transcription suivante, extrayez les informations clés et retournez-les sous forme de JSON structuré en français. Les sections à extraire sont spécifiées ci-dessous. Gérez les ambiguïtés en inférant des détails raisonnables basés sur le contexte et excluez les informations non pertinentes ou peu claires.
+    Vous êtes un assistant IA spécialisé dans la rédaction de comptes rendus de réunion. 
+    À partir de la transcription suivante et du contexte de la réunion précédente, extrayez les informations clés et retournez-les sous forme de JSON structuré en français.
 
-    **Sections à extraire** :
-    - **presence_list** : Liste des participants présents et absents sous forme de chaîne (ex. "Présents : Alice, Bob\nAbsents : Charlie"). Identifiez les noms mentionnés comme présents ou absents dans la transcription. Si non trouvé, utilisez "Présents : Non spécifié\nAbsents : Non spécifié".
-    - **agenda_items** : Liste des points de l'ordre du jour sous forme de chaîne (ex. "1. Relecture du compte rendu\n2. Résolutions"). Déduisez les points discutés ou explicitement mentionnés comme ordre du jour. Si non trouvé, utilisez "Non spécifié".
-    - **resolutions_summary** : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). "date", "deadline" et "execution_date" doivent être au format DD/MM/YYYY. "report_count" est une chaîne (ex. "0").
-    - **sanctions_summary** : Liste de sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status"). "date" doit être au format DD/MM/YYYY, "amount" est une chaîne.
-    - **start_time** : Heure de début de la réunion (format HHhMMmin, ex. 07h00min). Déduisez-la si mentionnée, sinon utilisez "Non spécifié".
-    - **end_time** : Heure de fin de la réunion (format HHhMMmin, ex. 10h34min). Déduisez-la si mentionnée, sinon utilisez "Non spécifié".
-    - **rapporteur** : Nom du rapporteur de la réunion. Déduisez-le si mentionné, sinon utilisez "Non spécifié".
-    - **president** : Nom du président de la réunion. Déduisez-le si mentionné, sinon utilisez "Non spécifié".
-    - **balance_amount** : Solde du compte DRI Solidarité (ex. "827540"). Déduisez-le si mentionné, sinon utilisez "Non spécifié".
-    - **balance_date** : Date du solde (format DD/MM/YYYY). Déduisez-la si mentionnée, sinon utilisez la date fournie : {date}.
+    **Contexte de la réunion précédente** :
+    {previous_context if previous_context else "Aucun contexte disponible."}
 
-    **Instructions** :
-    1. Pour chaque intervenant, identifiez ses contributions, résolutions et actions assignées.
-    2. Si une information n’est pas trouvée, utilisez des valeurs par défaut raisonnables (ex. "Non spécifié" ou la date fournie : {date}).
-    3. Assurez-vous que le JSON est bien formé et que toutes les dates respectent le format DD/MM/YYYY.
-    4. Priorisez les informations claires et exploitables, en évitant les détails non pertinents.
-
-    **Transcription** :
+    **Transcription de la réunion actuelle** :
     {transcription}
 
-    Retournez le résultat sous forme de JSON structuré, en français.
+    **Sections à extraire** :
+    - **presence_list** : Liste des participants présents et absents sous forme de chaîne (ex. "Présents : Alice, Bob\nAbsents : Charlie"). Si non trouvé, utilisez "Présents : Non spécifié\nAbsents : Non spécifié".
+    - **agenda_items** : Liste des points de l'ordre du jour sous forme de chaîne (ex. "1. Relecture du compte rendu\n2. Résolutions"). Si non trouvé, utilisez "Non spécifié".
+    - **resolutions_summary** : Liste de résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). "date", "deadline" et "execution_date" au format DD/MM/YYYY.
+    - **sanctions_summary** : Liste de sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status"). "date" au format DD/MM/YYYY.
+    - **start_time** : Heure de début (format HHhMMmin). Si non trouvé, "Non spécifié".
+    - **end_time** : Heure de fin (format HHhMMmin). Si non trouvé, "Non spécifié".
+    - **rapporteur** : Nom du rapporteur. Si non trouvé, "Non spécifié".
+    - **president** : Nom du président. Si non trouvé, "Non spécifié".
+    - **balance_amount** : Solde du compte (ex. "827540"). Si non trouvé, "Non spécifié".
+    - **balance_date** : Date du solde (format DD/MM/YYYY). Si non trouvé, utilisez {date}.
+
+    **Instructions** :
+    1. Utilisez le contexte de la réunion précédente pour comprendre les sujets récurrents et les décisions antérieures.
+    2. Concentrez-vous sur la transcription actuelle pour extraire les nouvelles informations, mais utilisez le contexte pour clarifier les références ou les suivis.
+    3. Si une information n’est pas trouvée, utilisez des valeurs par défaut raisonnables.
+    4. Assurez-vous que le JSON est bien formé et que toutes les dates respectent le format DD/MM/YYYY.
     """
     
     try:
@@ -116,7 +131,6 @@ def extract_info(transcription, meeting_title, date, api_key):
 
 def extract_info_fallback(transcription, meeting_title, date):
     """Fallback mode for structuring information if Deepseek API fails"""
-    # Initialize default values
     extracted_data = {
         "date": date,
         "start_time": "Non spécifié",
@@ -147,7 +161,6 @@ def extract_info_fallback(transcription, meeting_title, date):
         "transcription": transcription
     }
 
-    # Extract start_time and end_time
     start_time_match = re.search(r"(?:a commencé à|début.*?\b)(\d{1,2}h\d{2})\b", transcription, re.IGNORECASE)
     end_time_match = re.search(r"(?:s'est terminée à|fin.*?\b)(\d{1,2}h\d{2})\b", transcription, re.IGNORECASE)
     if start_time_match:
@@ -155,20 +168,17 @@ def extract_info_fallback(transcription, meeting_title, date):
     if end_time_match:
         extracted_data["end_time"] = end_time_match.group(1) + "min"
 
-    # Extract presence_list
     presence_match = re.search(r"(?:présents|présences)\s*:\s*([^.\n]+)", transcription, re.IGNORECASE)
     absence_match = re.search(r"(?:absents|absences)\s*:\s*([^.\n]+)", transcription, re.IGNORECASE)
     presents = presence_match.group(1).strip() if presence_match else "Non spécifié"
     absents = absence_match.group(1).strip() if absence_match else "Non spécifié"
     extracted_data["presence_list"] = f"Présents : {presents}\nAbsents : {absents}"
 
-    # Extract agenda_items
     agenda_match = re.search(r"(?:ordre du jour|agenda)\s*:\s*([\s\S]*?)(?=\n\n|\Z)", transcription, re.IGNORECASE)
     if agenda_match:
         agenda_lines = [line.strip("- \t") for line in agenda_match.group(1).split("\n") if line.strip()]
         extracted_data["agenda_items"] = "\n".join(agenda_lines) if agenda_lines else "Non spécifié"
 
-    # Extract rapporteur and president
     rapporteur_match = re.search(r"rapporteur\s*:\s*([^.\n]+)", transcription, re.IGNORECASE)
     president_match = re.search(r"(?:président|présidente)\s*(?:de\s*la\s*réunion)?\s*:\s*([^.\n]+)", transcription, re.IGNORECASE)
     if rapporteur_match:
@@ -176,13 +186,11 @@ def extract_info_fallback(transcription, meeting_title, date):
     if president_match:
         extracted_data["president"] = president_match.group(1).strip()
 
-    # Extract balance_amount and balance_date
     balance_match = re.search(r"solde\s*(?:du compte)?\s*.*?(\d+(?:,\d{3})*)\s*(?:XAF|FCFA)?\s*(?:au|le)\s*(\d{1,2}/\d{1,2}/\d{4})", transcription, re.IGNORECASE)
     if balance_match:
         extracted_data["balance_amount"] = balance_match.group(1).replace(",", "")
         extracted_data["balance_date"] = balance_match.group(2)
 
-    # Extract resolutions
     resolutions_section = re.search(r"(?:résolutions prises|résolutions)\s*:(.*?)(?=\n\n(?:sanctions|le solde|$))", transcription, re.IGNORECASE | re.DOTALL)
     if resolutions_section:
         resolution_lines = resolutions_section.group(1).strip().split("\n")
@@ -206,7 +214,6 @@ def extract_info_fallback(transcription, meeting_title, date):
         if resolutions:
             extracted_data["resolutions_summary"] = resolutions
 
-    # Extract sanctions
     sanctions_section = re.search(r"sanctions\s*:(.*?)(?=\n\nle solde|$)", transcription, re.IGNORECASE | re.DOTALL)
     if sanctions_section:
         sanction_lines = sanctions_section.group(1).strip().split("\n")
@@ -248,7 +255,7 @@ def set_cell_margins(cell, top=0.1, bottom=0.1, left=0.1, right=0.1):
     tcMar = OxmlElement('w:tcMar')
     for margin, value in zip(['top', 'bottom', 'left', 'right'], [top, bottom, left, right]):
         margin_elm = OxmlElement(f'w:{margin}')
-        margin_elm.set(qn('w:w'), str(int(value * 1440)))  # Convert inches to twips (1 inch = 1440 twips)
+        margin_elm.set(qn('w:w'), str(int(value * 1440)))
         margin_elm.set(qn('w:type'), 'dxa')
         tcMar.append(margin_elm)
     tcPr.append(tcMar)
@@ -284,7 +291,7 @@ def add_styled_paragraph(doc, text, font_name="Century", font_size=12, bold=Fals
     return p
 
 def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), header_text_color=(255, 255, 255), alt_row_bg_color=(192, 192, 192), column_widths=None, table_width=6.5):
-    """Add a styled table to the document with background colors, custom widths, and adjustable table width."""
+    """Add a styled table to the document with background colors and custom widths."""
     table = doc.add_table(rows=rows, cols=cols)
     try:
         table.style = "Table Grid"
@@ -320,7 +327,7 @@ def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), 
     return table
 
 def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14, box_width_in_inches=5.0):
-    """Add text inside a single-cell table with a background color to simulate a centered box."""
+    """Add text inside a single-cell table with a background color."""
     table = doc.add_table(rows=1, cols=1)
     table.style = "Table Grid"
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -663,6 +670,9 @@ def main():
         st.header("Paramètres API Deepseek")
         st.session_state.api_key = st.text_input("Clé API Deepseek", value=st.session_state.api_key, type="password")
         
+        st.header("Contexte Précédent")
+        previous_report = st.file_uploader("Uploader le compte rendu précédent (optionnel)", type=["docx"])
+        
         if uploaded_file is not None:
             file_extension = uploaded_file.name.split('.')[-1].lower()
             st.info(f"Fichier téléchargé: {uploaded_file.name}")
@@ -680,7 +690,6 @@ def main():
         meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
         meeting_date = st.date_input("Date de la Réunion", datetime.now())
         
-        # Placeholder for extracted data
         if 'extracted_info' in st.session_state:
             extracted_info = st.session_state.extracted_info
             default_presence = extracted_info.get("presence_list", "Présents : Non spécifié\nAbsents : Non spécifié")
@@ -747,13 +756,18 @@ def main():
             if st.button("Formater les Notes de Réunion") and DOCX_AVAILABLE:
                 edited_transcription = st.session_state.get("edited_transcription", transcription)
                 
+                previous_context = ""
+                if previous_report:
+                    previous_context = extract_context_from_report(previous_report)
+                
                 if st.session_state.api_key:
                     with st.spinner("Extraction des informations avec Deepseek..."):
                         extracted_info = extract_info(
                             edited_transcription,
                             meeting_title,
                             meeting_date.strftime("%d/%m/%Y"),
-                            st.session_state.api_key
+                            st.session_state.api_key,
+                            previous_context
                         )
                         if not extracted_info:
                             extracted_info = extract_info_fallback(
@@ -769,7 +783,6 @@ def main():
                         meeting_date.strftime("%d/%m/%Y")
                     )
                 
-                # Override with UI inputs only if they differ from defaults
                 if extracted_info:
                     if presence_list != default_presence:
                         extracted_info["presence_list"] = presence_list
