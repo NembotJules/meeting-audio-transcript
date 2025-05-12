@@ -674,9 +674,82 @@ def fill_template_and_generate_docx(extracted_info):
 
 def main():
     st.title("Outil de Transcription de Réunion")
-    # Your main application logic here
-    # This is where you'd handle user inputs, call the transcription, and generate the document
-    pass
-
+    
+    # Sidebar for API keys and previous report
+    st.sidebar.header("Configuration")
+    st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
+    st.session_state.deepseek_api_key = st.sidebar.text_input("Deepseek API Key", type="password")
+    
+    st.sidebar.header("Previous Context")
+    previous_report = st.sidebar.file_uploader("Upload Previous Report (optional)", type=["docx", "pdf", "png", "jpg", "jpeg"])
+    if previous_report:
+        status_text = st.sidebar.empty()
+        status_text.text("Extracting context...")
+        context = extract_context_from_report(previous_report, st.session_state.mistral_api_key)
+        status_text.text("Context extracted successfully!")
+        st.session_state.previous_context = context
+    else:
+        st.session_state.previous_context = ""
+    
+    # Context testing section
+    st.sidebar.subheader("Test the Context")
+    question = st.sidebar.text_input("Ask a question about the previous context:")
+    if st.sidebar.button("Get Answer") and question and 'previous_context' in st.session_state:
+        with st.spinner("Generating answer..."):
+            answer = answer_question_with_context(question, st.session_state.previous_context, st.session_state.deepseek_api_key)
+        st.sidebar.write("**Answer:**", answer)
+    
+    # Main app content
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.header("Détails de la Réunion")
+        meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
+        meeting_date = st.date_input("Date de la Réunion", datetime.now())
+    
+    with col2:
+        st.header("Transcription & Sortie")
+        uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "wav", "m4a", "flac"])
+        whisper_model = st.selectbox("Whisper Model", ["tiny", "base", "small", "medium", "large"], index=1)
+        
+        if uploaded_file is not None:
+            file_extension = uploaded_file.name.split('.')[-1].lower()
+            if st.button("Transcribe Audio"):
+                with st.spinner(f"Transcribing with Whisper {whisper_model}..."):
+                    transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
+                    if transcription and not transcription.startswith("Erreur"):
+                        st.session_state.transcription = transcription
+                        st.text_area("Transcription", transcription, height=200)
+        
+        if 'transcription' in st.session_state:
+            if st.button("Extract Information"):
+                with st.spinner("Extracting information..."):
+                    extracted_info = extract_info(
+                        st.session_state.transcription,
+                        meeting_title,
+                        meeting_date.strftime("%d/%m/%Y"),
+                        st.session_state.deepseek_api_key,
+                        st.session_state.get("previous_context", "")
+                    )
+                    if not extracted_info:
+                        extracted_info = extract_info_fallback(
+                            st.session_state.transcription,
+                            meeting_title,
+                            meeting_date.strftime("%d/%m/%Y")
+                        )
+                    st.session_state.extracted_info = extracted_info
+                    st.text_area("Extracted Information", json.dumps(extracted_info, indent=2), height=300)
+            
+            if 'extracted_info' in st.session_state:
+                if st.button("Generate Document"):
+                    with st.spinner("Generating document..."):
+                        docx_data = fill_template_and_generate_docx(st.session_state.extracted_info)
+                        if docx_data:
+                            st.download_button(
+                                label="Download Meeting Notes",
+                                data=docx_data,
+                                file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            )
 if __name__ == "__main__":
     main()
