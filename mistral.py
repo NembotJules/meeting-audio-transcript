@@ -10,15 +10,15 @@ model = "mistral-small-latest"
 # Initialize the Mistral client
 client = Mistral(api_key=api_key)
 
-# If local document, upload and retrieve the signed url
-# uploaded_pdf = client.files.upload(
-#     file={
-#         "file_name": "uploaded_file.pdf",
-#         "content": open("uploaded_file.pdf", "rb"),
-#     },
-#     purpose="ocr"
-# )
-# signed_url = client.files.get_signed_url(file_id=uploaded_pdf.id)
+#If local document, upload and retrieve the signed url
+uploaded_pdf = client.files.upload(
+    file={
+        "file_name": "AFB_CR.pdf",
+        "content": open("AFB_CR.pdf", "rb"),
+    },
+    purpose="ocr"
+)
+signed_url = client.files.get_signed_url(file_id=uploaded_pdf.id)
 
 # Define the messages for the chat
 messages = [
