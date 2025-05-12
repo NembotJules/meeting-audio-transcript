@@ -62,7 +62,7 @@ def extract_context_from_report(file, mistral_api_key):
     file_extension = file.name.split('.')[-1].lower()
     valid_extensions = ['pdf', 'png', 'jpg', 'jpeg']
     if file_extension not in valid_extensions:
-        st.error("Unsupported file type.")
+        st.error("Unsupported file type. Please upload a PDF, PNG, JPG, or JPEG.")
         return ""
     
     try:
@@ -80,10 +80,10 @@ def extract_context_from_report(file, mistral_api_key):
         # Retrieve the signed URL
         signed_url = client.files.get_signed_url(file_id=uploaded_file.id)
         
-        # Determine document type
+        # Set document type based on file extension
         document_type = "document_url" if file_extension == 'pdf' else "image_url"
         
-        # Prepare OCR request
+        # Construct the message with the correct structure
         messages = [
             {
                 "role": "user",
@@ -94,19 +94,19 @@ def extract_context_from_report(file, mistral_api_key):
                     },
                     {
                         "type": document_type,
-                        document_type: signed_url.url
+                        document_type: {"url": signed_url.url}
                     }
                 ]
             }
         ]
         
-        # Call Mistral OCR via chat API
+        # Call the Mistral chat API
         response = client.chat.complete(
-            model="mistral-small-latest",
+            model="mistral-small-latest",  # Adjust model name as needed
             messages=messages
         )
         
-        # Return extracted text
+        # Return the extracted text
         return response.choices[0].message.content.strip()
     
     except Exception as e:
@@ -181,7 +181,6 @@ def fill_template_and_generate_docx(extracted_info):
     """Build the Word document from scratch using python-docx"""
     try:
         doc = Document()
-        # Add document content generation logic here (simplified for brevity)
         doc.add_heading("Meeting Notes", 0)
         doc.add_paragraph(f"Title: {extracted_info.get('meeting_title', 'Untitled')}")
         doc.add_paragraph(f"Date: {extracted_info.get('date', 'Not specified')}")
