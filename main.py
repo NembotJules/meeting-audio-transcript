@@ -413,7 +413,7 @@ def fill_template_and_generate_docx(extracted_info):
         rapporteur = extracted_info.get("rapporteur", "Non spécifié")
         president = extracted_info.get("president", "Non spécifié")
         
-        if rapporteur != "Non spécifié":
+        if rapporteur != "Non spécifié": 
             add_styled_paragraph(
                 doc,
                 f"Rapporteur : {rapporteur}",
