@@ -72,7 +72,7 @@ def extract_context_from_report(file, mistral_api_key):
         uploaded_file = client.files.upload(
             file={
                 "file_name": file.name,
-                "content": file.getvalue(),  # Use getvalue() for Streamlit UploadedFile
+                "content": file.getvalue(),
             },
             purpose="ocr"
         )
@@ -94,7 +94,7 @@ def extract_context_from_report(file, mistral_api_key):
                     },
                     {
                         "type": document_type,
-                        document_type: signed_url.url  # Direct string instead of nested dict
+                        document_type: signed_url.url
                     }
                 ]
             }
@@ -112,6 +112,38 @@ def extract_context_from_report(file, mistral_api_key):
     except Exception as e:
         st.error(f"Error processing file with Mistral OCR: {e}")
         return ""
+
+def answer_question_with_context(question, context, deepseek_api_key):
+    """Answer a question based on the extracted context using Deepseek API."""
+    if not context or not question or not deepseek_api_key:
+        return "Please provide a question, context, and Deepseek API key."
+    
+    prompt = f"""
+    As an assistant, answer the following question based on the provided context.
+
+    **Context**:
+    {context}
+
+    **Question**:
+    {question}
+
+    **Answer**:
+    """
+    try:
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {deepseek_api_key}"}
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 500
+        }
+        response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload)
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"].strip()
+        else:
+            return f"API Error: {response.status_code}"
+    except Exception as e:
+        return f"Error: {e}"
 
 def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context=""):
     """Extract key information from the transcription using Deepseek API with previous context."""
@@ -213,8 +245,22 @@ def main():
         context = extract_context_from_report(previous_report, st.session_state.mistral_api_key)
         status_text.text("Context extracted successfully!")
         st.session_state.previous_context = context
+        st.sidebar.text_area("Extracted Context", context, height=200)
     else:
         st.session_state.previous_context = ""
+    
+    # Section to ask questions about the context
+    st.sidebar.header("Test the Context")
+    question = st.sidebar.text_input("Ask a question about the extracted context:")
+    if st.sidebar.button("Ask Question") and question and 'previous_context' in st.session_state and st.session_state.previous_context:
+        with st.spinner("Getting answer..."):
+            answer = answer_question_with_context(
+                question, 
+                st.session_state.previous_context, 
+                st.session_state.deepseek_api_key
+            )
+        st.sidebar.write("**Answer:**")
+        st.sidebar.write(answer)
     
     # Main app content
     col1, col2 = st.columns(2)
@@ -226,17 +272,25 @@ def main():
     
     with col2:
         st.header("Transcription & Output")
-        uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "wav", "m4a", "flac"])
-        whisper_model = st.selectbox("Whisper Model", ["tiny", "base", "small", "medium", "large"], index=1)
+        input_method = st.radio("Choose input method:", ("Upload Audio", "Input Transcript"))
         
-        if uploaded_file is not None:
-            file_extension = uploaded_file.name.split('.')[-1].lower()
-            if st.button("Transcribe Audio"):
-                with st.spinner(f"Transcribing with Whisper {whisper_model}..."):
-                    transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
-                    if transcription and not transcription.startswith("Error"):
-                        st.session_state.transcription = transcription
-                        st.text_area("Transcription", transcription, height=200)
+        if input_method == "Upload Audio":
+            uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "wav", "m4a", "flac"])
+            whisper_model = st.selectbox("Whisper Model", ["tiny", "base", "small", "medium", "large"], index=1)
+            
+            if uploaded_file is not None:
+                file_extension = uploaded_file.name.split('.')[-1].lower()
+                if st.button("Transcribe Audio"):
+                    with st.spinner(f"Transcribing with Whisper {whisper_model}..."):
+                        transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
+                        if transcription and not transcription.startswith("Error"):
+                            st.session_state.transcription = transcription
+                            st.text_area("Transcription", transcription, height=200)
+        else:
+            transcription_input = st.text_area("Enter the meeting transcript:", height=200)
+            if st.button("Submit Transcript") and transcription_input:
+                st.session_state.transcription = transcription_input
+                st.text_area("Transcription", transcription_input, height=200)
         
         if 'transcription' in st.session_state:
             if st.button("Extract Information"):
