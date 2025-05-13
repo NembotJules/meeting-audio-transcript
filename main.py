@@ -94,7 +94,7 @@ def extract_context_from_report(file, mistral_api_key):
                     },
                     {
                         "type": document_type,
-                        document_type: {"url": signed_url.url}
+                        document_type: signed_url.url  # Direct string instead of nested dict
                     }
                 ]
             }
@@ -102,7 +102,7 @@ def extract_context_from_report(file, mistral_api_key):
         
         # Call the Mistral chat API
         response = client.chat.complete(
-            model="mistral-small-latest",  # Adjust model name as needed
+            model="mistral-small-latest",
             messages=messages
         )
         
