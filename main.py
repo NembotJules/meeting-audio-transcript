@@ -145,6 +145,77 @@ def answer_question_with_context(question, context, deepseek_api_key):
     except Exception as e:
         return f"Error: {e}"
 
+def extract_info_fallback(transcription, meeting_title, date):
+    """Fallback function to extract information using basic string parsing and regex."""
+    extracted_data = {
+        "presence_list": "Present: Not specified\nAbsent: Not specified",
+        "agenda_items": "Not specified",
+        "resolutions_summary": [],
+        "sanctions_summary": [],
+        "start_time": "Not specified",
+        "end_time": "Not specified",
+        "rapporteur": "Not specified",
+        "president": "Not specified",
+        "balance_amount": "Not specified",
+        "balance_date": date,
+        "date": date,
+        "meeting_title": meeting_title
+    }
+
+    # Extract presence list
+    present_match = re.search(r"Present: ([^\n]+)", transcription, re.IGNORECASE)
+    absent_match = re.search(r"Absent: ([^\n]+)", transcription, re.IGNORECASE)
+    if present_match or absent_match:
+        present = present_match.group(1) if present_match else "Not specified"
+        absent = absent_match.group(1) if absent_match else "Not specified"
+        extracted_data["presence_list"] = f"Present: {present}\nAbsent: {absent}"
+
+    # Extract agenda items
+    agenda_match = re.search(r"Agenda:([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
+    if agenda_match:
+        agenda_items = agenda_match.group(1).strip()
+        items = [item.strip() for item in agenda_items.split("\n") if item.strip()]
+        if items:
+            extracted_data["agenda_items"] = "\n".join(items)
+
+    # Extract start and end times
+    time_pattern = r"\b(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))\b"
+    times = re.findall(time_pattern, transcription, re.IGNORECASE)
+    if times:
+        extracted_data["start_time"] = times[0]
+        if len(times) > 1:
+            extracted_data["end_time"] = times[-1]
+
+    # Extract rapporteur and president
+    rapporteur_match = re.search(r"Rapporteur: (\w+)", transcription, re.IGNORECASE)
+    president_match = re.search(r"President: (\w+)", transcription, re.IGNORECASE)
+    if rapporteur_match:
+        extracted_data["rapporteur"] = rapporteur_match.group(1)
+    if president_match:
+        extracted_data["president"] = president_match.group(1)
+
+    # Extract balance amount
+    balance_match = re.search(r"balance.*?(\d+)", transcription, re.IGNORECASE)
+    if balance_match:
+        extracted_data["balance_amount"] = balance_match.group(1)
+
+    # Extract resolutions (basic)
+    resolution_match = re.search(r"Resolution: (.*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
+    if resolution_match:
+        resolution_text = resolution_match.group(1).strip()
+        extracted_data["resolutions_summary"] = [{
+            "date": date,
+            "dossier": "Not specified",
+            "resolution": resolution_text,
+            "responsible": "Not specified",
+            "deadline": "Not specified",
+            "execution_date": "",
+            "status": "In progress",
+            "report_count": "0"
+        }]
+
+    return extracted_data
+
 def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context=""):
     """Extract key information from the transcription using Deepseek API with previous context."""
     prompt = f"""
@@ -172,12 +243,16 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     **Instructions**:
     1. For each speaker, identify their dossier(s), dates, resolutions, responsible party, deadline, status, and report count.
     2. If information is missing, use reasonable defaults (e.g., "Not specified" or provided date: {date}).
-    3. Ensure JSON is well-formed and dates follow DD/MM/YYYY format.
+    3. Ensure the output is a single, valid JSON object with proper syntax (e.g., use double quotes for keys and string values, no trailing commas).
     4. If you cannot extract the information or encounter any issues, return a JSON object with a single key "error" explaining the issue (e.g., {{"error": "Unable to parse transcription"}}).
-    5. Return the result as a single, valid JSON object. Do not include any additional text, explanations, or comments outside the JSON.
+    5. Do not include any text, explanations, or comments outside the JSON object. The response must be parseable by a JSON parser.
+    6. Ensure all dates in the output are in DD/MM/YYYY format (e.g., "14/05/2025").
 
     **Example Output**:
     {{"presence_list": "Present: Alice, Bob\nAbsent: Charlie", "agenda_items": "1. Review of minutes\n2. Resolutions", "resolutions_summary": [{{"date": "14/05/2025", "dossier": "Project X", "resolution": "Complete report", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "In progress", "report_count": "0"}}], "sanctions_summary": [], "start_time": "10h00min", "end_time": "11h00min", "rapporteur": "Bob", "president": "Alice", "balance_amount": "827540", "balance_date": "14/05/2025"}}
+
+    **Error Example**:
+    {{"error": "Unable to parse transcription due to unclear content"}}
 
     Return the result as structured JSON in English.
     """
@@ -200,7 +275,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         if response.status_code == 200:
             # Log the full response for debugging
             full_response = response.json()
-            st.write(f"Full Deepseek response: {full_response}")
+            st.write(f"Full Deepseek response: {json.dumps(full_response, indent=2)}")
             
             # Extract the content
             raw_response = full_response["choices"][0]["message"]["content"].strip()
@@ -208,30 +283,30 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             
             # Validate the response before parsing
             if not raw_response:
-                st.error("Deepseek API returned an empty response.")
-                return None
+                st.error("Deepseek API returned an empty response. Falling back to basic extraction.")
+                return extract_info_fallback(transcription, meeting_title, date)
             
             # Attempt to parse the response as JSON
             extracted_data = json.loads(raw_response)
             
             # Check if the response contains an error key
             if "error" in extracted_data:
-                st.error(f"Deepseek API error: {extracted_data['error']}")
-                return None
+                st.error(f"Deepseek API error: {extracted_data['error']}. Falling back to basic extraction.")
+                return extract_info_fallback(transcription, meeting_title, date)
             
             # Add meeting metadata
             extracted_data["date"] = date
             extracted_data["meeting_title"] = meeting_title
             return extracted_data
         else:
-            st.error(f"Deepseek API error: Status {response.status_code}, Message: {response.text}")
-            return None
+            st.error(f"Deepseek API error: Status {response.status_code}, Message: {response.text}. Falling back to basic extraction.")
+            return extract_info_fallback(transcription, meeting_title, date)
     except json.JSONDecodeError as e:
-        st.error(f"Error parsing JSON: {e}")
-        return None
+        st.error(f"Error parsing JSON: {e}. Falling back to basic extraction.")
+        return extract_info_fallback(transcription, meeting_title, date)
     except Exception as e:
-        st.error(f"Error extracting information: {e}")
-        return None
+        st.error(f"Error extracting information: {e}. Falling back to basic extraction.")
+        return extract_info_fallback(transcription, meeting_title, date)
 
 def to_roman(num):
     """Convert an integer to a Roman numeral."""
