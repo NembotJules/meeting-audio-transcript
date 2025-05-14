@@ -113,10 +113,10 @@ def extract_context_from_report(file, mistral_api_key):
         st.error(f"Error processing file with Mistral OCR: {e}")
         return ""
 
-def answer_question_with_context(question, context, deepseek_api_key):
-    """Answer a question based on the extracted context using Deepseek API."""
-    if not context or not question or not deepseek_api_key:
-        return "Please provide a question, context, and Deepseek API key."
+def answer_question_with_context(question, context, mistral_api_key):
+    """Answer a question based on the extracted context using Mistral API."""
+    if not context or not question or not mistral_api_key:
+        return "Please provide a question, context, and Mistral API key."
     
     prompt = f"""
     As an assistant, answer the following question based on the provided context.
@@ -130,23 +130,19 @@ def answer_question_with_context(question, context, deepseek_api_key):
     **Answer**:
     """
     try:
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {deepseek_api_key}"}
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "max_tokens": 500
-        }
-        response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload)
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"].strip()
-        else:
-            return f"API Error: {response.status_code}"
+        client = Mistral(api_key=mistral_api_key)
+        response = client.chat.complete(
+            model="mistral-small-latest",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=500
+        )
+        return response.choices[0].message.content.strip()
     except Exception as e:
         return f"Error: {e}"
 
 def extract_info_fallback(transcription, meeting_title, date):
-    """Fallback function to extract information using basic string parsing and regex."""
+    """Fallback function to extract information using improved string parsing and regex."""
     extracted_data = {
         "presence_list": "Présents: Non spécifié\nAbsents: Non spécifié",
         "agenda_items": "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers",
@@ -172,8 +168,11 @@ def extract_info_fallback(transcription, meeting_title, date):
     else:
         # Fallback to infer presence from names mentioned in the transcript
         names = re.findall(r"\b[A-Z][a-z]+(?: [A-Z][a-z]+)?\b", transcription)
+        # Filter out common words that might be mistaken as names (e.g., "Réunion", "Projet")
+        common_words = {"Réunion", "Projet", "Président", "Rapporteur", "Solde", "Compte", "Ordre", "Agenda"}
+        names = [name for name in set(names) if name not in common_words]
         if names:
-            extracted_data["presence_list"] = f"Présents: {', '.join(set(names))}\nAbsents: Non spécifié"
+            extracted_data["presence_list"] = f"Présents: {', '.join(names)}\nAbsents: Non spécifié"
 
     # Extract agenda items
     agenda_match = re.search(r"(Ordre du jour|Agenda)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
@@ -181,7 +180,13 @@ def extract_info_fallback(transcription, meeting_title, date):
         agenda_items = agenda_match.group(2).strip()
         items = [item.strip() for item in agenda_items.split("\n") if item.strip()]
         if items:
-            extracted_data["agenda_items"] = "\n".join(items)
+            # Add Roman numerals if not present
+            numbered_items = []
+            for idx, item in enumerate(items, 1):
+                if not re.match(r"^[IVXLC]+\-", item):
+                    item = f"{to_roman(idx)}- {item}"
+                numbered_items.append(item)
+            extracted_data["agenda_items"] = "\n".join(numbered_items)
 
     # Extract start and end times
     time_pattern = r"\b(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))\b"
@@ -192,8 +197,8 @@ def extract_info_fallback(transcription, meeting_title, date):
             extracted_data["end_time"] = times[-1]
 
     # Extract rapporteur and president
-    rapporteur_match = re.search(r"(Rapporteur|Rapporteuse)[:\s]*(\w+)", transcription, re.IGNORECASE)
-    president_match = re.search(r"(Président|Présidente|Prési)[:\s]*(\w+)", transcription, re.IGNORECASE)
+    rapporteur_match = re.search(r"(Rapporteur|Rapporteuse)[:\s]*([A-Z][a-z]+)", transcription, re.IGNORECASE)
+    president_match = re.search(r"(Président|Présidente|Prési)[:\s]*([A-Z][a-z]+)", transcription, re.IGNORECASE)
     if rapporteur_match:
         extracted_data["rapporteur"] = rapporteur_match.group(2)
     if president_match:
@@ -209,176 +214,173 @@ def extract_info_fallback(transcription, meeting_title, date):
     if balance_date_match:
         extracted_data["balance_date"] = balance_date_match.group(2)
 
-    # Extract resolutions (basic)
-    resolution_match = re.search(r"(Résolution|Resolution)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
-    if resolution_match:
-        resolution_text = resolution_match.group(2).strip()
-        extracted_data["resolutions_summary"] = [{
-            "date": date,
-            "dossier": "Non spécifié",
-            "resolution": resolution_text,
-            "responsible": "Non spécifié",
-            "deadline": "Non spécifié",
-            "execution_date": "",
-            "status": "En cours",
-            "report_count": "0"
-        }]
+    # Extract resolutions (improved)
+    resolution_section = re.search(r"(Résolution|Resolutions)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
+    if resolution_section:
+        resolution_text = resolution_section.group(2).strip()
+        # Split into individual resolutions if multiple are mentioned
+        resolution_lines = [line.strip() for line in resolution_text.split("\n") if line.strip()]
+        resolutions = []
+        for res in resolution_lines:
+            # Try to extract responsible person and deadline
+            responsible_match = re.search(r"(?:par|responsable|attribué à) ([A-Z][a-z]+)", res, re.IGNORECASE)
+            deadline_match = re.search(r"(?:d'ici|avant le) (\d{2}/\d{2}/\d{4})", res, re.IGNORECASE)
+            responsible = responsible_match.group(1) if responsible_match else "Non spécifié"
+            deadline = deadline_match.group(1) if deadline_match else "Non spécifié"
+            resolutions.append({
+                "date": date,
+                "dossier": "Non spécifié",
+                "resolution": res,
+                "responsible": responsible,
+                "deadline": deadline,
+                "execution_date": "",
+                "status": "En cours",
+                "report_count": "0"
+            })
+        extracted_data["resolutions_summary"] = resolutions
 
-    # Extract sanctions (basic)
-    sanction_match = re.search(r"(Sanction|Amende)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
-    if sanction_match:
-        sanction_text = sanction_match.group(2).strip()
-        extracted_data["sanctions_summary"] = [{
-            "name": "Non spécifié",
-            "reason": sanction_text,
-            "amount": "0",
-            "date": date,
-            "status": "Non appliquée"
-        }]
+    # Extract sanctions (improved)
+    sanction_section = re.search(r"(Sanction|Amende)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
+    if sanction_section:
+        sanction_text = sanction_section.group(2).strip()
+        sanction_lines = [line.strip() for line in sanction_text.split("\n") if line.strip()]
+        sanctions = []
+        for sanc in sanction_lines:
+            name_match = re.search(r"^[A-Z][a-z]+|^([A-Z][a-z]+)[\s,]", sanc)
+            amount_match = re.search(r"(\d+)\s*(?:FCFA|XAF)?", sanc)
+            reason_match = re.search(r"(?:pour|raison) ([a-zA-Z\s]+)", sanc, re.IGNORECASE)
+            name = name_match.group(1) if name_match else "Non spécifié"
+            amount = amount_match.group(1) if amount_match else "0"
+            reason = reason_match.group(1).strip() if reason_match else sanc
+            sanctions.append({
+                "name": name,
+                "reason": reason,
+                "amount": amount,
+                "date": date,
+                "status": "Appliquée"
+            })
+        extracted_data["sanctions_summary"] = sanctions
 
     return extracted_data
 
-def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context=""):
-    """Extract key information from the transcription using Deepseek API with previous context."""
+def extract_info(transcription, meeting_title, date, mistral_api_key, previous_context=""):
+    """Extract key information from the transcription using Mistral API with previous context."""
+    if not transcription or not mistral_api_key:
+        return extract_info_fallback(transcription, meeting_title, date)
+
     prompt = f"""
-    Vous êtes un assistant IA expert en rédaction automatique de comptes rendus de réunion pour une institution bancaire. Votre mission est d’analyser un transcript de réunion en vous appuyant sur le rapport de la réunion précédente, notamment les tableaux de la Revue d’Activités, du Récapitulatif des Résolutions, et du Récapitulatif des Sanctions, afin de générer un rapport structuré et pertinent sous forme de JSON avec des clés en anglais.
+    Vous êtes un assistant IA expert en rédaction automatique de comptes rendus de réunion pour une institution bancaire. Votre mission est d’analyser un transcript de réunion en français et de générer un rapport structuré sous forme de JSON avec des clés en anglais. Vous devez toujours retourner un JSON valide, même en cas d'échec.
 
-    🧠 **Contexte** :
-    Le rapport de la réunion précédente contient des informations-clés sur :
-    - Les membres impliqués (noms, départements si disponibles)
-    - Les dossiers traités par chacun
-    - L’état d’avancement des travaux (Résultats / Perspectives)
-    - Le tableau des résolutions (Date, Sujet, Responsable, Délai, Date d’exécution, Statut, Nombre de reports)
-    - Le tableau des sanctions (Nom, Motif, Montant, Date, Statut)
-
-    Voici le contenu du rapport de la réunion précédente :
+    **Contexte de la réunion précédente** :
     {previous_context if previous_context else "Aucun contexte disponible."}
 
-    Utilisez ces éléments comme contexte de travail pour mieux comprendre les échanges dans le transcript à analyser.
+    Utilisez ce contexte uniquement pour les résolutions et sanctions, et non pour la liste des présents/absents.
 
     **Transcript de la réunion actuelle** :
     {transcription}
 
-    ✅ **Informations à extraire du transcript** :
-    À partir du transcript, extrayez et structurez les informations suivantes dans un objet JSON avec les clés en anglais spécifiées ci-dessous :
+    **Instructions** :
+    - Extraire les informations suivantes et les structurer dans un objet JSON avec les clés en anglais spécifiées.
+    - Si une information est manquante, utilisez les valeurs par défaut indiquées.
+    - Assurez-vous que toutes les dates sont au format JJ/MM/AAAA (par exemple, "14/05/2025").
+    - Les clés du JSON doivent être en anglais, mais les valeurs doivent refléter le texte original (en français).
+    - Retournez toujours un JSON valide, même si vous ne pouvez pas extraire certaines informations. Si vous échouez complètement, retournez {{"error": "Impossible de traiter le transcript"}}.
+
+    **Informations à extraire** :
 
     1. **presence_list** : Liste des présents et absents sous forme de chaîne (par exemple, "Présents: Alice, Bob\nAbsents: Charlie").
-       - **Liste des présents** : Identifiez les participants ayant pris la parole ou mentionnés comme présents (mots-clés : "Présents", "Présent", "Présente"). Si implicite, déduisez à partir des interventions (ex. : "Alice a dit…" implique qu'Alice est présente). Seule la transcription actuelle doit être utilisée pour déterminer les présents.
-       - **Liste des absents** : Recherchez uniquement les mentions explicites dans le transcript (mots-clés : "Absents", "Absent", "Absente"). Ne déduisez pas les absents à partir du contexte précédent. Si aucune mention explicite, indiquez "Absents: Non spécifié".
+       - **Présents** : Identifiez les participants ayant pris la parole ou mentionnés comme présents (mots-clés : "Présents", "Présent"). Si implicite, déduisez à partir des interventions (ex. : "Alice a dit…" implique qu'Alice est présente). Seule la transcription actuelle doit être utilisée.
+       - **Absents** : Recherchez uniquement les mentions explicites dans le transcript (mots-clés : "Absents", "Absent"). Si aucune mention explicite, indiquez "Absents: Non spécifié".
        - Si aucune information sur les présents n’est trouvée, indiquez : "Présents: Non spécifié\nAbsents: Non spécifié".
 
     2. **agenda_items** : Liste des points de l'ordre du jour sous forme de chaîne (par exemple, "I- Revue des minutes\nII- Résolutions").
-       - Recherchez des mots-clés comme "Ordre du jour" ou "Agenda" pour identifier une liste explicite.
-       - Si aucun "Ordre du jour" n’est mentionné, déduisez les points discutés à partir des sujets abordés dans le transcript (ex. : "On a discuté des résolutions" peut indiquer un point sur les résolutions).
-       - Si rien ne peut être déduit, utilisez cette liste par défaut :
-         "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers".
+       - Recherchez des mots-clés comme "Ordre du jour" ou "Agenda".
+       - Si aucun "Ordre du jour" n’est mentionné, déduisez les points discutés à partir des sujets abordés (ex. : "On a discuté des résolutions").
+       - Si rien ne peut être déduit, utilisez : "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers".
 
     3. **president** : Président de séance.
-       - Recherchez la personne associée aux mots-clés comme "Président", "Présidente", "Prési", ou des mentions comme "présidé par".
-       - Si aucune information n’est trouvée, indiquez : "Non spécifié".
+       - Recherchez les mots-clés "Président", "Présidente", "Prési", ou des mentions comme "présidé par".
+       - Si non trouvé, indiquez : "Non spécifié".
 
     4. **rapporteur** : Rapporteur de la réunion.
-       - Recherchez des indices comme "Rapporteur", "Rapporteuse", ou toute mention indiquant qu’une personne est responsable de la rédaction du rapport (ex. : "Alice a rédigé…").
-       - Si aucune information n’est trouvée, indiquez : "Non spécifié".
+       - Recherchez "Rapporteur", "Rapporteuse", ou des mentions comme "a rédigé".
+       - Si non trouvé, indiquez : "Non spécifié".
 
-    5. **start_time** et **end_time** : Heure de début et de fin de la réunion (format HHhMMmin, par exemple, "07h00min").
-       - Identifiez les horaires directement mentionnés dans le transcript (ex. : "La réunion a commencé à 10h00", "finie à 11h30").
+    5. **start_time** et **end_time** : Heure de début et de fin (format HHhMMmin, ex. "07h00min").
+       - Identifiez les horaires mentionnés (ex. : "La réunion a commencé à 10h00").
        - Si non disponibles, utilisez "Non spécifié".
 
     6. **balance_amount** : Solde du compte solidarité DRI.
-       - Recherchez les mots-clés "solde", "compte", "balance".
-       - Si aucune information n’est trouvée, indiquez : "Non spécifié".
+       - Recherchez "solde", "compte", "balance".
+       - Si non trouvé, indiquez : "Non spécifié".
 
-    7. **balance_date** : Date du solde (format JJ/MM/AAAA, par exemple, "14/05/2025").
+    7. **balance_date** : Date du solde (format JJ/MM/AAAA).
        - Recherchez une date associée au solde.
-       - Si non mentionnée explicitement, utilisez la date fournie : {date}.
+       - Si non mentionnée, utilisez : {date}.
 
-    8. **resolutions_summary** : Tableau récapitulatif des résolutions.
-       - Présentez sous forme de tableau (liste de dictionnaires) les résolutions abordées durant la réunion actuelle, avec les clés suivantes :
-         - "date" : Date de la résolution (format JJ/MM/AAAA, utilisez {date} si non spécifiée).
-         - "dossier" : Sujet ou dossier concerné (ex. : "Projet X", utilisez "Non spécifié" si non clair).
-         - "resolution" : Description de la résolution (ex. : "Finaliser le rapport").
-         - "responsible" : Personne responsable (ex. : "Alice", utilisez "Non spécifié" si non clair).
-         - "deadline" : Délai d’exécution (format JJ/MM/AAAA, utilisez "Non spécifié" si non clair).
-         - "execution_date" : Date d’exécution (format JJ/MM/AAAA, laissez vide "" si non exécutée).
-         - "status" : Statut (ex. : "En cours", "Terminé", "Reporté").
-         - "report_count" : Nombre de reports (chaîne, ex. : "0", "1").
-       - Utilisez le contexte pour identifier les résolutions non résolues des réunions précédentes qui pourraient être mentionnées.
+    8. **resolutions_summary** : Tableau récapitulatif des résolutions (liste de dictionnaires).
+       - Clés : "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count".
+       - "date", "deadline", "execution_date" au format JJ/MM/AAAA.
+       - "report_count" comme une chaîne (ex. "0").
+       - Recherchez "Résolution", "Décision".
+       - Utilisez le contexte pour identifier les résolutions non résolues mentionnées.
+       - Valeurs par défaut : "dossier": "Non spécifié", "responsible": "Non spécifié", "deadline": "Non spécifié", "execution_date": "", "status": "En cours", "report_count": "0".
 
-    9. **sanctions_summary** : Tableau récapitulatif des sanctions.
-       - Présentez toutes les sanctions évoquées dans la réunion sous forme de tableau (liste de dictionnaires) avec les clés suivantes :
-         - "name" : Nom de la personne sanctionnée.
-         - "reason" : Motif de la sanction.
-         - "amount" : Montant en FCFA (chaîne, ex. : "5000").
-         - "date" : Date de la sanction (format JJ/MM/AAAA, utilisez {date} si non spécifiée).
-         - "status" : Statut (ex. : "Appliquée", "Non appliquée").
-       - Recherchez des mots-clés comme "Sanction", "Amende".
-
-    **Instructions supplémentaires** :
-    - Assurez-vous que la sortie est un objet JSON unique avec une syntaxe correcte (utilisez des guillemets doubles pour les clés et les valeurs de chaîne, pas de virgules finales).
-    - Si vous ne pouvez pas extraire les informations ou rencontrez des problèmes, retournez un objet JSON avec une seule clé "error" expliquant le problème (ex. : {{"error": "Impossible de parser la transcription"}}).
-    - Ne incluez aucun texte, explication, ou commentaire en dehors de l'objet JSON. La réponse doit être analysable par un parseur JSON.
-    - Assurez-vous que toutes les dates dans la sortie sont au format JJ/MM/AAAA (par exemple, "14/05/2025").
-    - Les clés du JSON doivent être en anglais (comme spécifié ci-dessus), mais les valeurs doivent refléter le texte original (donc en français).
+    9. **sanctions_summary** : Tableau récapitulatif des sanctions (liste de dictionnaires).
+       - Clés : "name", "reason", "amount", "date", "status".
+       - "date" au format JJ/MM/AAAA, "amount" comme une chaîne.
+       - Recherchez "Sanction", "Amende".
+       - Valeurs par défaut : "name": "Non spécifié", "reason": "Non spécifié", "amount": "0", "status": "Appliquée".
 
     **Exemple de sortie** :
     {{"presence_list": "Présents: Alice, Bob\nAbsents: Charlie", "agenda_items": "I- Revue des minutes\nII- Résolutions", "president": "Alice", "rapporteur": "Bob", "start_time": "10h00min", "end_time": "11h00min", "balance_amount": "827540", "balance_date": "14/05/2025", "resolutions_summary": [{{"date": "14/05/2025", "dossier": "Projet X", "resolution": "Finaliser le rapport", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "En cours", "report_count": "0"}}], "sanctions_summary": [{{"name": "Charlie", "reason": "Retard", "amount": "5000", "date": "14/05/2025", "status": "Appliquée"}}]}}
 
     **Exemple d'erreur** :
-    {{"error": "Impossible de parser la transcription en raison d'un contenu peu clair"}}
+    {{"error": "Transcript vide ou illisible"}}
 
     Retournez le résultat sous forme de JSON structuré.
     """
     try:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {deepseek_api_key}"
-        }
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "max_tokens": 4000
-        }
-        response = requests.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            headers=headers,
-            json=payload
+        client = Mistral(api_key=mistral_api_key)
+        response = client.chat.complete(
+            model="mistral-small-latest",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=4000
         )
-        if response.status_code == 200:
-            # Log the full response for debugging
-            full_response = response.json()
-            st.write(f"Full Deepseek response: {json.dumps(full_response, indent=2)}")
-            
-            # Extract the content
-            raw_response = full_response["choices"][0]["message"]["content"].strip()
-            st.write(f"Raw Deepseek response content: {raw_response}")
-            
-            # Validate the response before parsing
-            if not raw_response:
-                st.error("Deepseek API returned an empty response. Falling back to basic extraction.")
-                return extract_info_fallback(transcription, meeting_title, date)
-            
-            # Attempt to parse the response as JSON
-            extracted_data = json.loads(raw_response)
-            
-            # Check if the response contains an error key
-            if "error" in extracted_data:
-                st.error(f"Deepseek API error: {extracted_data['error']}. Falling back to basic extraction.")
-                return extract_info_fallback(transcription, meeting_title, date)
-            
-            # Add meeting metadata
-            extracted_data["date"] = date
-            extracted_data["meeting_title"] = meeting_title
-            return extracted_data
-        else:
-            st.error(f"Deepseek API error: Status {response.status_code}, Message: {response.text}. Falling back to basic extraction.")
+
+        # Extract the content
+        raw_response = response.choices[0].message.content.strip()
+        st.write(f"Raw Mistral response content: {repr(raw_response)}")  # Log the raw response for debugging
+        
+        # Check if the response is empty
+        if not raw_response:
+            st.error("Mistral API returned an empty response. Falling back to basic extraction.")
             return extract_info_fallback(transcription, meeting_title, date)
+        
+        # Check if the response looks like JSON
+        if not (raw_response.startswith("{") or raw_response.startswith("[")):
+            st.error(f"Mistral API response is not valid JSON: {raw_response}. Falling back to basic extraction.")
+            return extract_info_fallback(transcription, meeting_title, date)
+
+        # Attempt to parse the response as JSON
+        extracted_data = json.loads(raw_response)
+        
+        # Check if the response contains an error key
+        if "error" in extracted_data:
+            st.error(f"Mistral API error: {extracted_data['error']}. Falling back to basic extraction.")
+            return extract_info_fallback(transcription, meeting_title, date)
+        
+        # Add meeting metadata
+        extracted_data["date"] = date
+        extracted_data["meeting_title"] = meeting_title
+        return extracted_data
+
     except json.JSONDecodeError as e:
-        st.error(f"Error parsing JSON: {e}. Falling back to basic extraction.")
+        st.error(f"Error parsing JSON: {e}. Raw response: {repr(raw_response)}. Falling back to basic extraction.")
         return extract_info_fallback(transcription, meeting_title, date)
     except Exception as e:
-        st.error(f"Error extracting information: {e}. Falling back to basic extraction.")
+        st.error(f"Error extracting information with Mistral API: {e}. Falling back to basic extraction.")
         return extract_info_fallback(transcription, meeting_title, date)
 
 def to_roman(num):
@@ -761,7 +763,6 @@ def main():
     # Sidebar for API keys and previous report
     st.sidebar.header("Configuration")
     st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
-    st.session_state.deepseek_api_key = st.sidebar.text_input("Deepseek API Key", type="password")
     
     st.sidebar.header("Contexte Précédent")
     previous_report = st.sidebar.file_uploader("Télécharger le rapport précédent (optionnel)", type=["pdf", "png", "jpg", "jpeg"])
@@ -800,7 +801,7 @@ def main():
                 answer = answer_question_with_context(
                     question, 
                     st.session_state.previous_context, 
-                    st.session_state.deepseek_api_key
+                    st.session_state.mistral_api_key
                 )
             st.sidebar.write("**Réponse :**")
             st.sidebar.write(answer)
@@ -834,7 +835,7 @@ def main():
                                     st.session_state.transcription,
                                     meeting_title,
                                     meeting_date.strftime("%d/%m/%Y"),
-                                    st.session_state.deepseek_api_key,
+                                    st.session_state.mistral_api_key,
                                     st.session_state.get("previous_context", "")
                                 )
                                 if extracted_info:
@@ -850,7 +851,7 @@ def main():
                         st.session_state.transcription,
                         meeting_title,
                         meeting_date.strftime("%d/%m/%Y"),
-                        st.session_state.deepseek_api_key,
+                        st.session_state.mistral_api_key,
                         st.session_state.get("previous_context", "")
                     )
                     if extracted_info:
