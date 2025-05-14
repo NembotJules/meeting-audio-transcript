@@ -218,6 +218,7 @@ def extract_info_fallback(transcription, meeting_title, date):
 
 def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context=""):
     """Extract key information from the transcription using Deepseek API with previous context."""
+    # TODO: Update this prompt to French and adjust extraction logic as needed (future task)
     prompt = f"""
     You are an AI assistant specialized in drafting meeting reports. 
     From the following transcription and the previous meeting context (specifically Activity Review, Resolutions Summary), extract key information and return it as structured JSON in English.
@@ -757,15 +758,23 @@ def main():
                         transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
                         if transcription and not transcription.startswith("Error"):
                             st.session_state.transcription = transcription
-                            st.text_area("Transcription", transcription, height=200)
+                            # Automatically extract information after transcription
+                            with st.spinner("Extracting information..."):
+                                extracted_info = extract_info(
+                                    st.session_state.transcription,
+                                    meeting_title,
+                                    meeting_date.strftime("%d/%m/%Y"),
+                                    st.session_state.deepseek_api_key,
+                                    st.session_state.get("previous_context", "")
+                                )
+                                if extracted_info:
+                                    st.session_state.extracted_info = extracted_info
+                                    st.text_area("Extracted Information", json.dumps(extracted_info, indent=2), height=300)
         else:
             transcription_input = st.text_area("Enter the meeting transcript:", height=200)
             if st.button("Submit Transcript") and transcription_input:
                 st.session_state.transcription = transcription_input
-                st.text_area("Transcription", transcription_input, height=200)
-        
-        if 'transcription' in st.session_state:
-            if st.button("Extract Information"):
+                # Automatically extract information after submission
                 with st.spinner("Extracting information..."):
                     extracted_info = extract_info(
                         st.session_state.transcription,
@@ -777,18 +786,18 @@ def main():
                     if extracted_info:
                         st.session_state.extracted_info = extracted_info
                         st.text_area("Extracted Information", json.dumps(extracted_info, indent=2), height=300)
-            
-            if 'extracted_info' in st.session_state:
-                if st.button("Generate Document"):
-                    with st.spinner("Generating document..."):
-                        docx_data = fill_template_and_generate_docx(st.session_state.extracted_info)
-                        if docx_data:
-                            st.download_button(
-                                label="Download Meeting Notes",
-                                data=docx_data,
-                                file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
+        
+        if 'extracted_info' in st.session_state:
+            if st.button("Generate Document"):
+                with st.spinner("Generating document..."):
+                    docx_data = fill_template_and_generate_docx(st.session_state.extracted_info)
+                    if docx_data:
+                        st.download_button(
+                            label="Download Meeting Notes",
+                            data=docx_data,
+                            file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
 
 if __name__ == "__main__":
     main()
