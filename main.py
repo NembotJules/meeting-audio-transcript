@@ -162,18 +162,23 @@ def extract_info_fallback(transcription, meeting_title, date):
         "meeting_title": meeting_title
     }
 
-    # Extract presence list
-    present_match = re.search(r"Present: ([^\n]+)", transcription, re.IGNORECASE)
-    absent_match = re.search(r"Absent: ([^\n]+)", transcription, re.IGNORECASE)
+    # Extract presence list (French keywords)
+    present_match = re.search(r"(Présents|Présent|Present|Présentes|Présente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
+    absent_match = re.search(r"(Absents|Absent|Absentes|Absente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
     if present_match or absent_match:
-        present = present_match.group(1) if present_match else "Not specified"
-        absent = absent_match.group(1) if absent_match else "Not specified"
+        present = present_match.group(2).strip() if present_match else "Non spécifié"
+        absent = absent_match.group(2).strip() if absent_match else "Non spécifié"
         extracted_data["presence_list"] = f"Present: {present}\nAbsent: {absent}"
+    else:
+        # Fallback to infer presence from mentions
+        names = re.findall(r"\b[A-Z][a-z]+(?: [A-Z][a-z]+)?\b", transcription)
+        if names:
+            extracted_data["presence_list"] = f"Present: {', '.join(set(names))}\nAbsent: Non spécifié"
 
     # Extract agenda items
-    agenda_match = re.search(r"Agenda:([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
+    agenda_match = re.search(r"(Ordre du jour|Agenda)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
     if agenda_match:
-        agenda_items = agenda_match.group(1).strip()
+        agenda_items = agenda_match.group(2).strip()
         items = [item.strip() for item in agenda_items.split("\n") if item.strip()]
         if items:
             extracted_data["agenda_items"] = "\n".join(items)
@@ -187,30 +192,30 @@ def extract_info_fallback(transcription, meeting_title, date):
             extracted_data["end_time"] = times[-1]
 
     # Extract rapporteur and president
-    rapporteur_match = re.search(r"Rapporteur: (\w+)", transcription, re.IGNORECASE)
-    president_match = re.search(r"President: (\w+)", transcription, re.IGNORECASE)
+    rapporteur_match = re.search(r"(Rapporteur|Rapporteuse)[:\s]*(\w+)", transcription, re.IGNORECASE)
+    president_match = re.search(r"(Président|Présidente|President)[:\s]*(\w+)", transcription, re.IGNORECASE)
     if rapporteur_match:
-        extracted_data["rapporteur"] = rapporteur_match.group(1)
+        extracted_data["rapporteur"] = rapporteur_match.group(2)
     if president_match:
-        extracted_data["president"] = president_match.group(1)
+        extracted_data["president"] = president_match.group(2)
 
     # Extract balance amount
-    balance_match = re.search(r"balance.*?(\d+)", transcription, re.IGNORECASE)
+    balance_match = re.search(r"(solde|balance)[\s\w]*?(\d+)", transcription, re.IGNORECASE)
     if balance_match:
-        extracted_data["balance_amount"] = balance_match.group(1)
+        extracted_data["balance_amount"] = balance_match.group(2)
 
     # Extract resolutions (basic)
-    resolution_match = re.search(r"Resolution: (.*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
+    resolution_match = re.search(r"(Résolution|Resolution)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
     if resolution_match:
-        resolution_text = resolution_match.group(1).strip()
+        resolution_text = resolution_match.group(2).strip()
         extracted_data["resolutions_summary"] = [{
             "date": date,
-            "dossier": "Not specified",
+            "dossier": "Non spécifié",
             "resolution": resolution_text,
-            "responsible": "Not specified",
-            "deadline": "Not specified",
+            "responsible": "Non spécifié",
+            "deadline": "Non spécifié",
             "execution_date": "",
-            "status": "In progress",
+            "status": "En cours",
             "report_count": "0"
         }]
 
@@ -218,44 +223,44 @@ def extract_info_fallback(transcription, meeting_title, date):
 
 def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context=""):
     """Extract key information from the transcription using Deepseek API with previous context."""
-    # TODO: Update this prompt to French and adjust extraction logic as needed (future task)
     prompt = f"""
-    You are an AI assistant specialized in drafting meeting reports. 
-    From the following transcription and the previous meeting context (specifically Activity Review, Resolutions Summary), extract key information and return it as structured JSON in English.
+    Vous êtes un assistant IA spécialisé dans la rédaction de rapports de réunion. À partir de la transcription suivante et du contexte des réunions précédentes (en particulier la revue des activités et le résumé des résolutions), extrayez les informations clés et retournez-les sous forme de JSON structuré avec des clés en anglais et des valeurs tirées directement du texte (donc en français si le texte est en français).
 
-    **Previous Meeting Context**:
-    {previous_context if previous_context else "No context available."}
+    **Contexte de la réunion précédente** :
+    {previous_context if previous_context else "Aucun contexte disponible."}
 
-    **Current Meeting Transcription**:
+    **Transcription de la réunion actuelle** :
     {transcription}
 
-    **Sections to Extract**:
-    - **presence_list**: List of present and absent participants as a string (e.g., "Present: Alice, Bob\nAbsent: Charlie"). Identify names mentioned as present or absent. If not found, use "Present: Not specified\nAbsent: Not specified".
-    - **agenda_items**: List of agenda items as a string (e.g., "1. Review of minutes\n2. Resolutions"). Deduce discussed or explicitly mentioned items. If not found, use "Not specified".
-    - **resolutions_summary**: List of resolutions as an array (list of dictionaries with keys "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). "date", "deadline", and "execution_date" in DD/MM/YYYY format. "report_count" as a string (e.g., "0").
-    - **sanctions_summary**: List of sanctions as an array (list of dictionaries with keys "name", "reason", "amount", "date", "status"). "date" in DD/MM/YYYY format, "amount" as a string.
-    - **start_time**: Meeting start time (format HHhMMmin, e.g., 07h00min). Deduce if mentioned, else use "Not specified".
-    - **end_time**: Meeting end time (format HHhMMmin, e.g., 10h34min). Deduce if mentioned, else use "Not specified".
-    - **rapporteur**: Name of the meeting rapporteur. Deduce if mentioned, else use "Not specified".
-    - **president**: Name of the meeting president. Deduce if mentioned, else use "Not specified".
-    - **balance_amount**: DRI Solidarity account balance (e.g., "827540"). Deduce if mentioned, else use "Not specified".
-    - **balance_date**: Balance date (format DD/MM/YYYY). Deduce if mentioned, else use provided date: {date}.
+    **Sections à extraire** :
+    - **presence_list** : Liste des participants présents et absents sous forme de chaîne (par exemple, "Présents: Alice, Bob\nAbsents: Charlie"). Recherchez des mots-clés comme "Présents", "Présent", "Absents", "Absent", ou des mentions implicites (par exemple, "Alice a pris la parole" implique qu'Alice est présente). Si non trouvé, utilisez "Présents: Non spécifié\nAbsents: Non spécifié".
+    - **agenda_items** : Liste des points de l'ordre du jour sous forme de chaîne (par exemple, "1. Revue des minutes\n2. Résolutions"). Recherchez des mots-clés comme "Ordre du jour" ou "Agenda". Déduisez les points discutés si mentionnés explicitement ou implicitement. Si non trouvé, utilisez "Non spécifié".
+    - **resolutions_summary** : Liste des résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). "date", "deadline", et "execution_date" au format JJ/MM/AAAA. "report_count" comme une chaîne (par exemple, "0"). Recherchez des mots-clés comme "Résolution", "Décision". Utilisez le contexte pour identifier les résolutions non résolues des réunions précédentes qui pourraient être mentionnées.
+    - **sanctions_summary** : Liste des sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status"). "date" au format JJ/MM/AAAA, "amount" comme une chaîne. Recherchez des mots-clés comme "Sanction", "Amende".
+    - **start_time** : Heure de début de la réunion (format HHhMMmin, par exemple, 07h00min). Déduisez si mentionné (par exemple, "La réunion a commencé à 10h00"), sinon utilisez "Non spécifié".
+    - **end_time** : Heure de fin de la réunion (format HHhMMmin, par exemple, 10h34min). Déduisez si mentionné, sinon utilisez "Non spécifié".
+    - **rapporteur** : Nom du rapporteur de la réunion. Recherchez des mots-clés comme "Rapporteur", "Rapporteuse", ou des mentions comme "Alice a rédigé le rapport". Si non trouvé, utilisez "Non spécifié".
+    - **president** : Nom du président de la réunion. Recherchez des mots-clés comme "Président", "Présidente", ou des mentions comme "Bob a présidé la réunion". Si non trouvé, utilisez "Non spécifié".
+    - **balance_amount** : Solde du compte de solidarité DRI (par exemple, "827540"). Recherchez des mots-clés comme "solde", "balance", "compte". Si non trouvé, utilisez "Non spécifié".
+    - **balance_date** : Date du solde (format JJ/MM/AAAA). Déduisez si mentionné, sinon utilisez la date fournie : {date}.
 
-    **Instructions**:
-    1. For each speaker, identify their dossier(s), dates, resolutions, responsible party, deadline, status, and report count.
-    2. If information is missing, use reasonable defaults (e.g., "Not specified" or provided date: {date}).
-    3. Ensure the output is a single, valid JSON object with proper syntax (e.g., use double quotes for keys and string values, no trailing commas).
-    4. If you cannot extract the information or encounter any issues, return a JSON object with a single key "error" explaining the issue (e.g., {{"error": "Unable to parse transcription"}}).
-    5. Do not include any text, explanations, or comments outside the JSON object. The response must be parseable by a JSON parser.
-    6. Ensure all dates in the output are in DD/MM/YYYY format (e.g., "14/05/2025").
+    **Instructions** :
+    1. Utilisez le contexte de la réunion précédente pour identifier les participants récurrents, les résolutions non résolues, et les sanctions en cours qui pourraient être mentionnées dans la transcription actuelle.
+    2. Pour chaque intervenant, identifiez leurs dossiers, dates, résolutions, responsable, échéance, statut, et nombre de rapports.
+    3. Si une information est manquante, utilisez des valeurs par défaut raisonnables (par exemple, "Non spécifié" ou la date fournie : {date}).
+    4. Assurez-vous que la sortie est un objet JSON unique avec une syntaxe correcte (par exemple, utilisez des guillemets doubles pour les clés et les valeurs de chaîne, pas de virgules finales).
+    5. Si vous ne pouvez pas extraire les informations ou rencontrez des problèmes, retournez un objet JSON avec une seule clé "error" expliquant le problème (par exemple, {{"error": "Impossible de parser la transcription"}}).
+    6. Ne incluez aucun texte, explication, ou commentaire en dehors de l'objet JSON. La réponse doit être analysable par un parseur JSON.
+    7. Assurez-vous que toutes les dates dans la sortie sont au format JJ/MM/AAAA (par exemple, "14/05/2025").
+    8. Les clés du JSON doivent être en anglais (comme spécifié ci-dessus), mais les valeurs doivent refléter le texte original (donc en français si la transcription est en français).
 
-    **Example Output**:
-    {{"presence_list": "Present: Alice, Bob\nAbsent: Charlie", "agenda_items": "1. Review of minutes\n2. Resolutions", "resolutions_summary": [{{"date": "14/05/2025", "dossier": "Project X", "resolution": "Complete report", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "In progress", "report_count": "0"}}], "sanctions_summary": [], "start_time": "10h00min", "end_time": "11h00min", "rapporteur": "Bob", "president": "Alice", "balance_amount": "827540", "balance_date": "14/05/2025"}}
+    **Exemple de sortie** :
+    {{"presence_list": "Présents: Alice, Bob\nAbsents: Charlie", "agenda_items": "1. Revue des minutes\n2. Résolutions", "resolutions_summary": [{{"date": "14/05/2025", "dossier": "Projet X", "resolution": "Finaliser le rapport", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "En cours", "report_count": "0"}}], "sanctions_summary": [], "start_time": "10h00min", "end_time": "11h00min", "rapporteur": "Bob", "president": "Alice", "balance_amount": "827540", "balance_date": "14/05/2025"}}
 
-    **Error Example**:
-    {{"error": "Unable to parse transcription due to unclear content"}}
+    **Exemple d'erreur** :
+    {{"error": "Impossible de parser la transcription en raison d'un contenu peu clair"}}
 
-    Return the result as structured JSON in English.
+    Retournez le résultat sous forme de JSON structuré.
     """
     try:
         headers = {
@@ -419,32 +424,32 @@ def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14, box_width
     set_cell_margins(cell, top=0.2, bottom=0.2, left=0.3, right=0.3)
     return table
 
-def fill_template_and_generate_docx(extracted_info):
-    """Build the Word document from scratch using python-docx"""
+def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date):
+    """Build the Word document from scratch using python-docx and return the file data for download."""
     try:
         doc = Document()
 
         # Extract presence list and split into present and absent attendees
-        presence_list = extracted_info.get("presence_list", "Present: Not specified\nAbsent: Not specified")
+        presence_list = extracted_info.get("presence_list", "Présents: Non spécifié\nAbsents: Non spécifié")
         present_attendees = []
         absent_attendees = []
-        if "Present:" in presence_list and "Absent:" in presence_list:
+        if "Présents:" in presence_list and "Absents:" in presence_list:
             parts = presence_list.split("\n")
             for part in parts:
-                if part.startswith("Present:"):
-                    presents = part.replace("Present:", "").strip()
+                if part.startswith("Présents:"):
+                    presents = part.replace("Présents:", "").strip()
                     present_attendees = [name.strip() for name in presents.split(",") if name.strip()]
-                elif part.startswith("Absent:"):
-                    absents = part.replace("Absent:", "").strip()
+                elif part.startswith("Absents:"):
+                    absents = part.replace("Absents:", "").strip()
                     absent_attendees = [name.strip() for name in absents.split(",") if name.strip()]
         else:
-            present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Not specified" else []
+            present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Non spécifié" else []
 
         # Process agenda items
-        agenda_list = extracted_info.get("agenda_items", "Not specified").split("\n")
-        agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip() and item != "Not specified"]
+        agenda_list = extracted_info.get("agenda_items", "Non spécifié").split("\n")
+        agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip() and item != "Non spécifié"]
         if not agenda_list:
-            agenda_list = ["I. Not specified"]
+            agenda_list = ["I. Non spécifié"]
 
         # Add header box
         add_text_in_box(
@@ -480,7 +485,7 @@ def fill_template_and_generate_docx(extracted_info):
         # Add start and end times
         add_styled_paragraph(
             doc,
-            f"Start Time: {extracted_info.get('start_time', 'Not specified')}",
+            f"Heure de début: {extracted_info.get('start_time', 'Non spécifié')}",
             font_name="Century",
             font_size=12,
             bold=True,
@@ -488,7 +493,7 @@ def fill_template_and_generate_docx(extracted_info):
         )
         add_styled_paragraph(
             doc,
-            f"End Time: {extracted_info.get('end_time', 'Not specified')}",
+            f"Heure de fin: {extracted_info.get('end_time', 'Non spécifié')}",
             font_name="Century",
             font_size=12,
             bold=True,
@@ -496,9 +501,9 @@ def fill_template_and_generate_docx(extracted_info):
         )
 
         # Add rapporteur and president
-        rapporteur = extracted_info.get("rapporteur", "Not specified")
-        president = extracted_info.get("president", "Not specified")
-        if rapporteur != "Not specified":
+        rapporteur = extracted_info.get("rapporteur", "Non spécifié")
+        president = extracted_info.get("president", "Non spécifié")
+        if rapporteur != "Non spécifié":
             add_styled_paragraph(
                 doc,
                 f"Rapporteur: {rapporteur}",
@@ -507,10 +512,10 @@ def fill_template_and_generate_docx(extracted_info):
                 bold=True,
                 alignment=WD_ALIGN_PARAGRAPH.CENTER
             )
-        if president != "Not specified":
+        if president != "Non spécifié":
             add_styled_paragraph(
                 doc,
-                f"President of Meeting: {president}",
+                f"Président de la réunion: {president}",
                 font_name="Century",
                 font_size=12,
                 bold=True,
@@ -520,7 +525,7 @@ def fill_template_and_generate_docx(extracted_info):
         # Add attendance table
         add_styled_paragraph(
             doc,
-            "◆ ATTENDANCE LIST",
+            "◆ LISTE DE PRÉSENCE",
             font_name="Century",
             font_size=12,
             bold=True
@@ -541,7 +546,7 @@ def fill_template_and_generate_docx(extracted_info):
                 doc,
                 rows=max_rows + 1,
                 cols=2,
-                headers=["PRESENT", "ABSENT"],
+                headers=["PRÉSENTS", "ABSENTS"],
                 data=attendance_data,
                 header_bg_color=(0, 0, 0),
                 header_text_color=(255, 255, 255),
@@ -552,7 +557,7 @@ def fill_template_and_generate_docx(extracted_info):
         else:
             add_styled_paragraph(
                 doc,
-                "No attendance specified.",
+                "Aucune présence spécifiée.",
                 font_name="Century",
                 font_size=12
             )
@@ -560,7 +565,7 @@ def fill_template_and_generate_docx(extracted_info):
         # Add agenda items
         add_styled_paragraph(
             doc,
-            "◆ Agenda",
+            "◆ Ordre du jour",
             font_name="Century",
             font_size=12,
             bold=True
@@ -578,23 +583,23 @@ def fill_template_and_generate_docx(extracted_info):
         if not resolutions:
             resolutions = [{
                 "date": extracted_info.get("date", ""),
-                "dossier": "Not specified",
-                "resolution": "Not specified",
-                "responsible": "Not specified",
-                "deadline": "Not specified",
+                "dossier": "Non spécifié",
+                "resolution": "Non spécifié",
+                "responsible": "Non spécifié",
+                "deadline": "Non spécifié",
                 "execution_date": "",
-                "status": "In progress",
+                "status": "En cours",
                 "report_count": "0"
             }]
         add_styled_paragraph(
             doc,
-            "RESOLUTIONS SUMMARY",
+            "RÉSUMÉ DES RÉSOLUTIONS",
             font_name="Century",
             font_size=12,
             bold=True,
             color=RGBColor(192, 0, 0)
         )
-        resolutions_headers = ["DATE", "DOSSIER", "RESOLUTION", "RESP.", "DEADLINE", "EXECUTION DATE", "STATUS", "REPORT COUNT"]
+        resolutions_headers = ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"]
         resolutions_data = []
         for resolution in resolutions:
             row_data = [
@@ -626,21 +631,21 @@ def fill_template_and_generate_docx(extracted_info):
         sanctions = extracted_info.get("sanctions_summary", [])
         if not sanctions:
             sanctions = [{
-                "name": "None",
-                "reason": "No sanctions mentioned",
+                "name": "Aucune",
+                "reason": "Aucune sanction mentionnée",
                 "amount": "0",
                 "date": extracted_info.get("date", ""),
-                "status": "Not applied"
+                "status": "Non appliquée"
             }]
         add_styled_paragraph(
             doc,
-            "SANCTIONS SUMMARY",
+            "RÉSUMÉ DES SANCTIONS",
             font_name="Century",
             font_size=12,
             bold=True,
             color=RGBColor(192, 0, 0)
         )
-        sanctions_headers = ["NAME", "REASON", "AMOUNT (FCFA)", "DATE", "STATUS"]
+        sanctions_headers = ["NOM", "RAISON", "MONTANT (FCFA)", "DATE", "STATUT"]
         sanctions_data = []
         for sanction in sanctions:
             row_data = [
@@ -668,7 +673,7 @@ def fill_template_and_generate_docx(extracted_info):
         # Add balance information
         add_styled_paragraph(
             doc,
-            f"DRI Solidarity account balance (00001-00921711101-10) is XAF {extracted_info.get('balance_amount', 'Not specified')} as of {extracted_info.get('balance_date', '')}.",
+            f"Solde du compte de solidarité DRI (00001-00921711101-10) est de XAF {extracted_info.get('balance_amount', 'Non spécifié')} au {extracted_info.get('balance_date', '')}.",
             font_name="Century",
             font_size=12
         )
@@ -693,73 +698,73 @@ def main():
     st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
     st.session_state.deepseek_api_key = st.sidebar.text_input("Deepseek API Key", type="password")
     
-    st.sidebar.header("Previous Context")
-    previous_report = st.sidebar.file_uploader("Upload Previous Report (optional)", type=["pdf", "png", "jpg", "jpeg"])
+    st.sidebar.header("Contexte Précédent")
+    previous_report = st.sidebar.file_uploader("Télécharger le rapport précédent (optionnel)", type=["pdf", "png", "jpg", "jpeg"])
     if previous_report:
         st.session_state.previous_report = previous_report
         st.session_state.previous_context = ""  # Reset context until a question is asked
-        st.sidebar.write("Previous report uploaded. Ask a question to extract context.")
+        st.sidebar.write("Rapport précédent téléchargé. Posez une question pour extraire le contexte.")
     else:
         st.session_state.previous_report = None
         st.session_state.previous_context = ""
     
     # Section to ask questions about the context
-    st.sidebar.header("Test the Context")
-    question = st.sidebar.text_input("Ask a question about the previous report:")
-    if st.sidebar.button("Ask Question") and question:
+    st.sidebar.header("Tester le Contexte")
+    question = st.sidebar.text_input("Posez une question sur le rapport précédent :")
+    if st.sidebar.button("Poser la Question") and question:
         if not st.session_state.mistral_api_key:
-            st.sidebar.error("Please provide a Mistral API key to extract context.")
+            st.sidebar.error("Veuillez fournir une clé API Mistral pour extraire le contexte.")
         elif not st.session_state.previous_report:
-            st.sidebar.error("Please upload a previous report to extract context.")
+            st.sidebar.error("Veuillez télécharger un rapport précédent pour extraire le contexte.")
         else:
-            with st.spinner("Extracting context..."):
+            with st.spinner("Extraction du contexte..."):
                 context = extract_context_from_report(
                     st.session_state.previous_report, 
                     st.session_state.mistral_api_key
                 )
                 if context:
                     st.session_state.previous_context = context
-                    st.sidebar.text_area("Extracted Context", context, height=200)
-                    st.sidebar.success("Context extracted successfully!")
+                    st.sidebar.text_area("Contexte Extrait", context, height=200)
+                    st.sidebar.success("Contexte extrait avec succès !")
                 else:
                     st.session_state.previous_context = ""
-                    st.sidebar.error("Failed to extract context. Check the API key or file.")
+                    st.sidebar.error("Échec de l'extraction du contexte. Vérifiez la clé API ou le fichier.")
             
             # Now answer the question
-            with st.spinner("Getting answer..."):
+            with st.spinner("Obtention de la réponse..."):
                 answer = answer_question_with_context(
                     question, 
                     st.session_state.previous_context, 
                     st.session_state.deepseek_api_key
                 )
-            st.sidebar.write("**Answer:**")
+            st.sidebar.write("**Réponse :**")
             st.sidebar.write(answer)
     
     # Main app content
     col1, col2 = st.columns(2)
     
     with col1:
-        st.header("Meeting Details")
-        meeting_title = st.text_input("Meeting Title", value="Meeting")
-        meeting_date = st.date_input("Meeting Date", datetime.now())
+        st.header("Détails de la Réunion")
+        meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
+        meeting_date = st.date_input("Date de la Réunion", datetime.now())
     
     with col2:
-        st.header("Transcription & Output")
-        input_method = st.radio("Choose input method:", ("Upload Audio", "Input Transcript"))
+        st.header("Transcription & Résultat")
+        input_method = st.radio("Choisissez la méthode d'entrée :", ("Télécharger Audio", "Entrer la Transcription"))
         
-        if input_method == "Upload Audio":
-            uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "wav", "m4a", "flac"])
-            whisper_model = st.selectbox("Whisper Model", ["tiny", "base", "small", "medium", "large"], index=1)
+        if input_method == "Télécharger Audio":
+            uploaded_file = st.file_uploader("Téléchargez un fichier audio", type=["mp3", "wav", "m4a", "flac"])
+            whisper_model = st.selectbox("Modèle Whisper", ["tiny", "base", "small", "medium", "large"], index=1)
             
             if uploaded_file is not None:
                 file_extension = uploaded_file.name.split('.')[-1].lower()
-                if st.button("Transcribe Audio"):
-                    with st.spinner(f"Transcribing with Whisper {whisper_model}..."):
+                if st.button("Transcrire l'Audio"):
+                    with st.spinner(f"Transcription avec Whisper {whisper_model}..."):
                         transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
                         if transcription and not transcription.startswith("Error"):
                             st.session_state.transcription = transcription
                             # Automatically extract information after transcription
-                            with st.spinner("Extracting information..."):
+                            with st.spinner("Extraction des informations..."):
                                 extracted_info = extract_info(
                                     st.session_state.transcription,
                                     meeting_title,
@@ -769,13 +774,13 @@ def main():
                                 )
                                 if extracted_info:
                                     st.session_state.extracted_info = extracted_info
-                                    st.text_area("Extracted Information", json.dumps(extracted_info, indent=2), height=300)
+                                    st.text_area("Informations Extraites", json.dumps(extracted_info, indent=2), height=300)
         else:
-            transcription_input = st.text_area("Enter the meeting transcript:", height=200)
-            if st.button("Submit Transcript") and transcription_input:
+            transcription_input = st.text_area("Entrez la transcription de la réunion :", height=200)
+            if st.button("Soumettre la Transcription") and transcription_input:
                 st.session_state.transcription = transcription_input
                 # Automatically extract information after submission
-                with st.spinner("Extracting information..."):
+                with st.spinner("Extraction des informations..."):
                     extracted_info = extract_info(
                         st.session_state.transcription,
                         meeting_title,
@@ -785,18 +790,24 @@ def main():
                     )
                     if extracted_info:
                         st.session_state.extracted_info = extracted_info
-                        st.text_area("Extracted Information", json.dumps(extracted_info, indent=2), height=300)
+                        st.text_area("Informations Extraites", json.dumps(extracted_info, indent=2), height=300)
         
         if 'extracted_info' in st.session_state:
-            if st.button("Generate Document"):
-                with st.spinner("Generating document..."):
-                    docx_data = fill_template_and_generate_docx(st.session_state.extracted_info)
+            if st.button("Générer et Télécharger le Document"):
+                with st.spinner("Génération du document..."):
+                    docx_data = fill_template_and_generate_docx(
+                        st.session_state.extracted_info,
+                        meeting_title,
+                        meeting_date
+                    )
                     if docx_data:
                         st.download_button(
-                            label="Download Meeting Notes",
+                            label="Téléchargement du Document en Cours...",
                             data=docx_data,
                             file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key="download-button",
+                            on_click=lambda: None  # No-op to prevent re-rendering issues
                         )
 
 if __name__ == "__main__":
