@@ -148,32 +148,32 @@ def answer_question_with_context(question, context, deepseek_api_key):
 def extract_info_fallback(transcription, meeting_title, date):
     """Fallback function to extract information using basic string parsing and regex."""
     extracted_data = {
-        "presence_list": "Present: Not specified\nAbsent: Not specified",
-        "agenda_items": "Not specified",
+        "presence_list": "Présents: Non spécifié\nAbsents: Non spécifié",
+        "agenda_items": "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers",
         "resolutions_summary": [],
         "sanctions_summary": [],
-        "start_time": "Not specified",
-        "end_time": "Not specified",
-        "rapporteur": "Not specified",
-        "president": "Not specified",
-        "balance_amount": "Not specified",
+        "start_time": "Non spécifié",
+        "end_time": "Non spécifié",
+        "rapporteur": "Non spécifié",
+        "president": "Non spécifié",
+        "balance_amount": "Non spécifié",
         "balance_date": date,
         "date": date,
         "meeting_title": meeting_title
     }
 
     # Extract presence list (French keywords)
-    present_match = re.search(r"(Présents|Présent|Present|Présentes|Présente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
+    present_match = re.search(r"(Présents|Présent|Présentes|Présente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
     absent_match = re.search(r"(Absents|Absent|Absentes|Absente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
     if present_match or absent_match:
         present = present_match.group(2).strip() if present_match else "Non spécifié"
         absent = absent_match.group(2).strip() if absent_match else "Non spécifié"
-        extracted_data["presence_list"] = f"Present: {present}\nAbsent: {absent}"
+        extracted_data["presence_list"] = f"Présents: {present}\nAbsents: {absent}"
     else:
-        # Fallback to infer presence from mentions
+        # Fallback to infer presence from names mentioned in the transcript
         names = re.findall(r"\b[A-Z][a-z]+(?: [A-Z][a-z]+)?\b", transcription)
         if names:
-            extracted_data["presence_list"] = f"Present: {', '.join(set(names))}\nAbsent: Non spécifié"
+            extracted_data["presence_list"] = f"Présents: {', '.join(set(names))}\nAbsents: Non spécifié"
 
     # Extract agenda items
     agenda_match = re.search(r"(Ordre du jour|Agenda)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
@@ -193,16 +193,21 @@ def extract_info_fallback(transcription, meeting_title, date):
 
     # Extract rapporteur and president
     rapporteur_match = re.search(r"(Rapporteur|Rapporteuse)[:\s]*(\w+)", transcription, re.IGNORECASE)
-    president_match = re.search(r"(Président|Présidente|President)[:\s]*(\w+)", transcription, re.IGNORECASE)
+    president_match = re.search(r"(Président|Présidente|Prési)[:\s]*(\w+)", transcription, re.IGNORECASE)
     if rapporteur_match:
         extracted_data["rapporteur"] = rapporteur_match.group(2)
     if president_match:
         extracted_data["president"] = president_match.group(2)
 
     # Extract balance amount
-    balance_match = re.search(r"(solde|balance)[\s\w]*?(\d+)", transcription, re.IGNORECASE)
+    balance_match = re.search(r"(solde|compte|balance)[\s\w]*?(\d+)", transcription, re.IGNORECASE)
     if balance_match:
         extracted_data["balance_amount"] = balance_match.group(2)
+
+    # Extract balance date
+    balance_date_match = re.search(r"(solde|compte|balance)[\s\w]*?(\d{2}/\d{2}/\d{4})", transcription, re.IGNORECASE)
+    if balance_date_match:
+        extracted_data["balance_date"] = balance_date_match.group(2)
 
     # Extract resolutions (basic)
     resolution_match = re.search(r"(Résolution|Resolution)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
@@ -219,43 +224,105 @@ def extract_info_fallback(transcription, meeting_title, date):
             "report_count": "0"
         }]
 
+    # Extract sanctions (basic)
+    sanction_match = re.search(r"(Sanction|Amende)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
+    if sanction_match:
+        sanction_text = sanction_match.group(2).strip()
+        extracted_data["sanctions_summary"] = [{
+            "name": "Non spécifié",
+            "reason": sanction_text,
+            "amount": "0",
+            "date": date,
+            "status": "Non appliquée"
+        }]
+
     return extracted_data
 
 def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context=""):
     """Extract key information from the transcription using Deepseek API with previous context."""
     prompt = f"""
-    Vous êtes un assistant IA spécialisé dans la rédaction de rapports de réunion. À partir de la transcription suivante et du contexte des réunions précédentes (en particulier la revue des activités et le résumé des résolutions), extrayez les informations clés et retournez-les sous forme de JSON structuré avec des clés en anglais et des valeurs tirées directement du texte (donc en français si le texte est en français).
+    Vous êtes un assistant IA expert en rédaction automatique de comptes rendus de réunion pour une institution bancaire. Votre mission est d’analyser un transcript de réunion en vous appuyant sur le rapport de la réunion précédente, notamment les tableaux de la Revue d’Activités, du Récapitulatif des Résolutions, et du Récapitulatif des Sanctions, afin de générer un rapport structuré et pertinent sous forme de JSON avec des clés en anglais.
 
-    **Contexte de la réunion précédente** :
+    🧠 **Contexte** :
+    Le rapport de la réunion précédente contient des informations-clés sur :
+    - Les membres impliqués (noms, départements si disponibles)
+    - Les dossiers traités par chacun
+    - L’état d’avancement des travaux (Résultats / Perspectives)
+    - Le tableau des résolutions (Date, Sujet, Responsable, Délai, Date d’exécution, Statut, Nombre de reports)
+    - Le tableau des sanctions (Nom, Motif, Montant, Date, Statut)
+
+    Voici le contenu du rapport de la réunion précédente :
     {previous_context if previous_context else "Aucun contexte disponible."}
 
-    **Transcription de la réunion actuelle** :
+    Utilisez ces éléments comme contexte de travail pour mieux comprendre les échanges dans le transcript à analyser.
+
+    **Transcript de la réunion actuelle** :
     {transcription}
 
-    **Sections à extraire** :
-    - **presence_list** : Liste des participants présents et absents sous forme de chaîne (par exemple, "Présents: Alice, Bob\nAbsents: Charlie"). Recherchez des mots-clés comme "Présents", "Présent", "Absents", "Absent", ou des mentions implicites (par exemple, "Alice a pris la parole" implique qu'Alice est présente). Si non trouvé, utilisez "Présents: Non spécifié\nAbsents: Non spécifié".
-    - **agenda_items** : Liste des points de l'ordre du jour sous forme de chaîne (par exemple, "1. Revue des minutes\n2. Résolutions"). Recherchez des mots-clés comme "Ordre du jour" ou "Agenda". Déduisez les points discutés si mentionnés explicitement ou implicitement. Si non trouvé, utilisez "Non spécifié".
-    - **resolutions_summary** : Liste des résolutions sous forme de tableau (liste de dictionnaires avec les clés "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count"). "date", "deadline", et "execution_date" au format JJ/MM/AAAA. "report_count" comme une chaîne (par exemple, "0"). Recherchez des mots-clés comme "Résolution", "Décision". Utilisez le contexte pour identifier les résolutions non résolues des réunions précédentes qui pourraient être mentionnées.
-    - **sanctions_summary** : Liste des sanctions sous forme de tableau (liste de dictionnaires avec les clés "name", "reason", "amount", "date", "status"). "date" au format JJ/MM/AAAA, "amount" comme une chaîne. Recherchez des mots-clés comme "Sanction", "Amende".
-    - **start_time** : Heure de début de la réunion (format HHhMMmin, par exemple, 07h00min). Déduisez si mentionné (par exemple, "La réunion a commencé à 10h00"), sinon utilisez "Non spécifié".
-    - **end_time** : Heure de fin de la réunion (format HHhMMmin, par exemple, 10h34min). Déduisez si mentionné, sinon utilisez "Non spécifié".
-    - **rapporteur** : Nom du rapporteur de la réunion. Recherchez des mots-clés comme "Rapporteur", "Rapporteuse", ou des mentions comme "Alice a rédigé le rapport". Si non trouvé, utilisez "Non spécifié".
-    - **president** : Nom du président de la réunion. Recherchez des mots-clés comme "Président", "Présidente", ou des mentions comme "Bob a présidé la réunion". Si non trouvé, utilisez "Non spécifié".
-    - **balance_amount** : Solde du compte de solidarité DRI (par exemple, "827540"). Recherchez des mots-clés comme "solde", "balance", "compte". Si non trouvé, utilisez "Non spécifié".
-    - **balance_date** : Date du solde (format JJ/MM/AAAA). Déduisez si mentionné, sinon utilisez la date fournie : {date}.
+    ✅ **Informations à extraire du transcript** :
+    À partir du transcript, extrayez et structurez les informations suivantes dans un objet JSON avec les clés en anglais spécifiées ci-dessous :
 
-    **Instructions** :
-    1. Utilisez le contexte de la réunion précédente pour identifier les participants récurrents, les résolutions non résolues, et les sanctions en cours qui pourraient être mentionnées dans la transcription actuelle.
-    2. Pour chaque intervenant, identifiez leurs dossiers, dates, résolutions, responsable, échéance, statut, et nombre de rapports.
-    3. Si une information est manquante, utilisez des valeurs par défaut raisonnables (par exemple, "Non spécifié" ou la date fournie : {date}).
-    4. Assurez-vous que la sortie est un objet JSON unique avec une syntaxe correcte (par exemple, utilisez des guillemets doubles pour les clés et les valeurs de chaîne, pas de virgules finales).
-    5. Si vous ne pouvez pas extraire les informations ou rencontrez des problèmes, retournez un objet JSON avec une seule clé "error" expliquant le problème (par exemple, {{"error": "Impossible de parser la transcription"}}).
-    6. Ne incluez aucun texte, explication, ou commentaire en dehors de l'objet JSON. La réponse doit être analysable par un parseur JSON.
-    7. Assurez-vous que toutes les dates dans la sortie sont au format JJ/MM/AAAA (par exemple, "14/05/2025").
-    8. Les clés du JSON doivent être en anglais (comme spécifié ci-dessus), mais les valeurs doivent refléter le texte original (donc en français si la transcription est en français).
+    1. **presence_list** : Liste des présents et absents sous forme de chaîne (par exemple, "Présents: Alice, Bob\nAbsents: Charlie").
+       - **Liste des présents** : Identifiez les participants ayant pris la parole ou mentionnés comme présents (mots-clés : "Présents", "Présent", "Présente"). Si implicite, déduisez à partir des interventions (ex. : "Alice a dit…" implique qu'Alice est présente). Seule la transcription actuelle doit être utilisée pour déterminer les présents.
+       - **Liste des absents** : Recherchez uniquement les mentions explicites dans le transcript (mots-clés : "Absents", "Absent", "Absente"). Ne déduisez pas les absents à partir du contexte précédent. Si aucune mention explicite, indiquez "Absents: Non spécifié".
+       - Si aucune information sur les présents n’est trouvée, indiquez : "Présents: Non spécifié\nAbsents: Non spécifié".
+
+    2. **agenda_items** : Liste des points de l'ordre du jour sous forme de chaîne (par exemple, "I- Revue des minutes\nII- Résolutions").
+       - Recherchez des mots-clés comme "Ordre du jour" ou "Agenda" pour identifier une liste explicite.
+       - Si aucun "Ordre du jour" n’est mentionné, déduisez les points discutés à partir des sujets abordés dans le transcript (ex. : "On a discuté des résolutions" peut indiquer un point sur les résolutions).
+       - Si rien ne peut être déduit, utilisez cette liste par défaut :
+         "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers".
+
+    3. **president** : Président de séance.
+       - Recherchez la personne associée aux mots-clés comme "Président", "Présidente", "Prési", ou des mentions comme "présidé par".
+       - Si aucune information n’est trouvée, indiquez : "Non spécifié".
+
+    4. **rapporteur** : Rapporteur de la réunion.
+       - Recherchez des indices comme "Rapporteur", "Rapporteuse", ou toute mention indiquant qu’une personne est responsable de la rédaction du rapport (ex. : "Alice a rédigé…").
+       - Si aucune information n’est trouvée, indiquez : "Non spécifié".
+
+    5. **start_time** et **end_time** : Heure de début et de fin de la réunion (format HHhMMmin, par exemple, "07h00min").
+       - Identifiez les horaires directement mentionnés dans le transcript (ex. : "La réunion a commencé à 10h00", "finie à 11h30").
+       - Si non disponibles, utilisez "Non spécifié".
+
+    6. **balance_amount** : Solde du compte solidarité DRI.
+       - Recherchez les mots-clés "solde", "compte", "balance".
+       - Si aucune information n’est trouvée, indiquez : "Non spécifié".
+
+    7. **balance_date** : Date du solde (format JJ/MM/AAAA, par exemple, "14/05/2025").
+       - Recherchez une date associée au solde.
+       - Si non mentionnée explicitement, utilisez la date fournie : {date}.
+
+    8. **resolutions_summary** : Tableau récapitulatif des résolutions.
+       - Présentez sous forme de tableau (liste de dictionnaires) les résolutions abordées durant la réunion actuelle, avec les clés suivantes :
+         - "date" : Date de la résolution (format JJ/MM/AAAA, utilisez {date} si non spécifiée).
+         - "dossier" : Sujet ou dossier concerné (ex. : "Projet X", utilisez "Non spécifié" si non clair).
+         - "resolution" : Description de la résolution (ex. : "Finaliser le rapport").
+         - "responsible" : Personne responsable (ex. : "Alice", utilisez "Non spécifié" si non clair).
+         - "deadline" : Délai d’exécution (format JJ/MM/AAAA, utilisez "Non spécifié" si non clair).
+         - "execution_date" : Date d’exécution (format JJ/MM/AAAA, laissez vide "" si non exécutée).
+         - "status" : Statut (ex. : "En cours", "Terminé", "Reporté").
+         - "report_count" : Nombre de reports (chaîne, ex. : "0", "1").
+       - Utilisez le contexte pour identifier les résolutions non résolues des réunions précédentes qui pourraient être mentionnées.
+
+    9. **sanctions_summary** : Tableau récapitulatif des sanctions.
+       - Présentez toutes les sanctions évoquées dans la réunion sous forme de tableau (liste de dictionnaires) avec les clés suivantes :
+         - "name" : Nom de la personne sanctionnée.
+         - "reason" : Motif de la sanction.
+         - "amount" : Montant en FCFA (chaîne, ex. : "5000").
+         - "date" : Date de la sanction (format JJ/MM/AAAA, utilisez {date} si non spécifiée).
+         - "status" : Statut (ex. : "Appliquée", "Non appliquée").
+       - Recherchez des mots-clés comme "Sanction", "Amende".
+
+    **Instructions supplémentaires** :
+    - Assurez-vous que la sortie est un objet JSON unique avec une syntaxe correcte (utilisez des guillemets doubles pour les clés et les valeurs de chaîne, pas de virgules finales).
+    - Si vous ne pouvez pas extraire les informations ou rencontrez des problèmes, retournez un objet JSON avec une seule clé "error" expliquant le problème (ex. : {{"error": "Impossible de parser la transcription"}}).
+    - Ne incluez aucun texte, explication, ou commentaire en dehors de l'objet JSON. La réponse doit être analysable par un parseur JSON.
+    - Assurez-vous que toutes les dates dans la sortie sont au format JJ/MM/AAAA (par exemple, "14/05/2025").
+    - Les clés du JSON doivent être en anglais (comme spécifié ci-dessus), mais les valeurs doivent refléter le texte original (donc en français).
 
     **Exemple de sortie** :
-    {{"presence_list": "Présents: Alice, Bob\nAbsents: Charlie", "agenda_items": "1. Revue des minutes\n2. Résolutions", "resolutions_summary": [{{"date": "14/05/2025", "dossier": "Projet X", "resolution": "Finaliser le rapport", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "En cours", "report_count": "0"}}], "sanctions_summary": [], "start_time": "10h00min", "end_time": "11h00min", "rapporteur": "Bob", "president": "Alice", "balance_amount": "827540", "balance_date": "14/05/2025"}}
+    {{"presence_list": "Présents: Alice, Bob\nAbsents: Charlie", "agenda_items": "I- Revue des minutes\nII- Résolutions", "president": "Alice", "rapporteur": "Bob", "start_time": "10h00min", "end_time": "11h00min", "balance_amount": "827540", "balance_date": "14/05/2025", "resolutions_summary": [{{"date": "14/05/2025", "dossier": "Projet X", "resolution": "Finaliser le rapport", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "En cours", "report_count": "0"}}], "sanctions_summary": [{{"name": "Charlie", "reason": "Retard", "amount": "5000", "date": "14/05/2025", "status": "Appliquée"}}]}}
 
     **Exemple d'erreur** :
     {{"error": "Impossible de parser la transcription en raison d'un contenu peu clair"}}
@@ -446,10 +513,8 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Non spécifié" else []
 
         # Process agenda items
-        agenda_list = extracted_info.get("agenda_items", "Non spécifié").split("\n")
-        agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip() and item != "Non spécifié"]
-        if not agenda_list:
-            agenda_list = ["I. Non spécifié"]
+        agenda_list = extracted_info.get("agenda_items", "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers").split("\n")
+        agenda_list = [item.strip() for item in agenda_list if item.strip()]
 
         # Add header box
         add_text_in_box(
@@ -463,7 +528,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         # Add meeting title
         add_styled_paragraph(
             doc,
-            "MEETING NOTES",
+            "COMPTE RENDU DE RÉUNION",
             font_name="Century",
             font_size=12,
             bold=True,
@@ -807,7 +872,7 @@ def main():
                             file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                             key="download-button",
-                            on_click=lambda: None  # No-op to prevent re-rendering issues
+                            on_click=lambda: None
                         )
 
 if __name__ == "__main__":
