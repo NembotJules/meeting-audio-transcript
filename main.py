@@ -72,7 +72,8 @@ def extract_context_from_report(file, mistral_api_key):
         uploaded_file = client.files.upload(
             file={
                 "file_name": file.name,
-                "content": file.getvalue(),
+               # "content": file.getvalue(),
+                "content": open(file, "rb")
             },
             purpose="ocr"
         )
