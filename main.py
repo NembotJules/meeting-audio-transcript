@@ -72,8 +72,7 @@ def extract_context_from_report(file, mistral_api_key):
         uploaded_file = client.files.upload(
             file={
                 "file_name": file.name,
-               # "content": file.getvalue(),
-                "content": open(file, "rb")
+                "content": file.getvalue(),
             },
             purpose="ocr"
         )
@@ -199,6 +198,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             try:
                 extracted_data = json.loads(raw_response)
                 extracted_data["date"] = date
+                extracted_data["meeting_title"] = meeting_title  # Add meeting_title for document generation
                 return extracted_data
             except json.JSONDecodeError as e:
                 st.error(f"Error parsing JSON: {e}")
@@ -210,22 +210,378 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         st.error(f"Error extracting information: {e}")
         return None
 
+def to_roman(num):
+    """Convert an integer to a Roman numeral."""
+    roman_numerals = {
+        1: "I", 2: "II", 3: "III", 4: "IV", 5: "V",
+        6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"
+    }
+    return roman_numerals.get(num, str(num))
+
+def set_cell_background(cell, rgb_color):
+    """Set the background color of a table cell using RGB values."""
+    shading_elm = OxmlElement('w:shd')
+    shading_elm.set(qn('w:fill'), f"{rgb_color[0]:02X}{rgb_color[1]:02X}{rgb_color[2]:02X}")
+    cell._element.get_or_add_tcPr().append(shading_elm)
+
+def set_cell_margins(cell, top=0.1, bottom=0.1, left=0.1, right=0.1):
+    """Set the margins of a table cell to adjust padding."""
+    tc = cell._element
+    tcPr = tc.get_or_add_tcPr()
+    tcMar = OxmlElement('w:tcMar')
+    for margin, value in zip(['top', 'bottom', 'left', 'right'], [top, bottom, left, right]):
+        margin_elm = OxmlElement(f'w:{margin}')
+        margin_elm.set(qn('w:w'), str(int(value * 1440)))
+        margin_elm.set(qn('w:type'), 'dxa')
+        tcMar.append(margin_elm)
+    tcPr.append(tcMar)
+
+def set_table_width(table, width_in_inches):
+    """Set the width of the table and allow columns to adjust proportionally."""
+    table.autofit = False
+    table.allow_autofit = False
+    table_width = Inches(width_in_inches)
+    table.width = table_width
+    for row in table.rows:
+        for cell in row.cells:
+            cell.width = table_width
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+def set_column_widths(table, widths_in_inches):
+    """Set preferred widths for each column in the table."""
+    for i, width in enumerate(widths_in_inches):
+        for row in table.rows:
+            cell = row.cells[i]
+            cell.width = Inches(width)
+
+def add_styled_paragraph(doc, text, font_name="Century", font_size=12, bold=False, color=None, alignment=WD_ALIGN_PARAGRAPH.LEFT):
+    """Add a styled paragraph to the document."""
+    p = doc.add_paragraph(text)
+    p.alignment = alignment
+    run = p.runs[0]
+    run.font.name = font_name
+    run.font.size = Pt(font_size)
+    run.font.bold = bold
+    if color:
+        run.font.color.rgb = color
+    return p
+
+def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), header_text_color=(255, 255, 255), alt_row_bg_color=(192, 192, 192), column_widths=None, table_width=6.5):
+    """Add a styled table to the document with background colors and custom widths."""
+    table = doc.add_table(rows=rows, cols=cols)
+    try:
+        table.style = "Table Grid"
+    except KeyError:
+        st.warning("The 'Table Grid' style is not available. Using default style.")
+    
+    set_table_width(table, table_width)
+    if column_widths:
+        set_column_widths(table, column_widths)
+    
+    for j, header in enumerate(headers):
+        cell = table.cell(0, j)
+        cell.text = header
+        run = cell.paragraphs[0].runs[0]
+        run.font.name = "Century"
+        run.font.size = Pt(12)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(*header_text_color)
+        set_cell_background(cell, header_bg_color)
+    
+    for i, row_data in enumerate(data):
+        row = table.rows[i + 1]
+        if (i + 1) % 2 == 0:
+            for cell in row.cells:
+                set_cell_background(cell, alt_row_bg_color)
+        for j, cell_text in enumerate(row_data):
+            cell = row.cells[j]
+            cell.text = cell_text
+            run = cell.paragraphs[0].runs[0]
+            run.font.name = "Century"
+            run.font.size = Pt(12)
+    
+    return table
+
+def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14, box_width_in_inches=5.0):
+    """Add text inside a single-cell table with a background color."""
+    table = doc.add_table(rows=1, cols=1)
+    table.style = "Table Grid"
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    set_table_width(table, box_width_in_inches)
+    cell = table.cell(0, 0)
+    cell.text = text
+    paragraph = cell.paragraphs[0]
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.runs[0]
+    run.font.name = "Century"
+    run.font.size = Pt(font_size)
+    run.font.bold = True
+    set_cell_background(cell, bg_color)
+    set_cell_margins(cell, top=0.2, bottom=0.2, left=0.3, right=0.3)
+    return table
+
 def fill_template_and_generate_docx(extracted_info):
     """Build the Word document from scratch using python-docx"""
     try:
         doc = Document()
-        doc.add_heading("Meeting Notes", 0)
-        doc.add_paragraph(f"Title: {extracted_info.get('meeting_title', 'Untitled')}")
-        doc.add_paragraph(f"Date: {extracted_info.get('date', 'Not specified')}")
-        doc.add_paragraph(f"Presence: {extracted_info.get('presence_list', 'Not specified')}")
-        doc.add_paragraph(f"Agenda: {extracted_info.get('agenda_items', 'Not specified')}")
-        
+
+        # Extract presence list and split into present and absent attendees
+        presence_list = extracted_info.get("presence_list", "Present: Not specified\nAbsent: Not specified")
+        present_attendees = []
+        absent_attendees = []
+        if "Present:" in presence_list and "Absent:" in presence_list:
+            parts = presence_list.split("\n")
+            for part in parts:
+                if part.startswith("Present:"):
+                    presents = part.replace("Present:", "").strip()
+                    present_attendees = [name.strip() for name in presents.split(",") if name.strip()]
+                elif part.startswith("Absent:"):
+                    absents = part.replace("Absent:", "").strip()
+                    absent_attendees = [name.strip() for name in absents.split(",") if name.strip()]
+        else:
+            present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Not specified" else []
+
+        # Process agenda items
+        agenda_list = extracted_info.get("agenda_items", "Not specified").split("\n")
+        agenda_list = [f"{to_roman(idx)}. {item.strip()}" for idx, item in enumerate(agenda_list, 1) if item.strip() and item != "Not specified"]
+        if not agenda_list:
+            agenda_list = ["I. Not specified"]
+
+        # Add header box
+        add_text_in_box(
+            doc,
+            "Direction Recherches et Investissements",
+            bg_color=(192, 192, 192),
+            font_size=16,
+            box_width_in_inches=5.0
+        )
+
+        # Add meeting title
+        add_styled_paragraph(
+            doc,
+            "MEETING NOTES",
+            font_name="Century",
+            font_size=12,
+            bold=True,
+            color=RGBColor(192, 0, 0),
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
+        )
+
+        # Add date
+        add_styled_paragraph(
+            doc,
+            extracted_info.get("date", ""),
+            font_name="Century",
+            font_size=12,
+            bold=True,
+            color=RGBColor(192, 0, 0),
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
+        )
+
+        # Add start and end times
+        add_styled_paragraph(
+            doc,
+            f"Start Time: {extracted_info.get('start_time', 'Not specified')}",
+            font_name="Century",
+            font_size=12,
+            bold=True,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
+        )
+        add_styled_paragraph(
+            doc,
+            f"End Time: {extracted_info.get('end_time', 'Not specified')}",
+            font_name="Century",
+            font_size=12,
+            bold=True,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER
+        )
+
+        # Add rapporteur and president
+        rapporteur = extracted_info.get("rapporteur", "Not specified")
+        president = extracted_info.get("president", "Not specified")
+        if rapporteur != "Not specified":
+            add_styled_paragraph(
+                doc,
+                f"Rapporteur: {rapporteur}",
+                font_name="Century",
+                font_size=12,
+                bold=True,
+                alignment=WD_ALIGN_PARAGRAPH.CENTER
+            )
+        if president != "Not specified":
+            add_styled_paragraph(
+                doc,
+                f"President of Meeting: {president}",
+                font_name="Century",
+                font_size=12,
+                bold=True,
+                alignment=WD_ALIGN_PARAGRAPH.CENTER
+            )
+
+        # Add attendance table
+        add_styled_paragraph(
+            doc,
+            "◆ ATTENDANCE LIST",
+            font_name="Century",
+            font_size=12,
+            bold=True
+        )
+
+        if present_attendees or absent_attendees:
+            max_rows = max(len(present_attendees), len(absent_attendees))
+            if max_rows == 0:
+                max_rows = 1
+            attendance_data = []
+            for i in range(max_rows):
+                present_text = present_attendees[i] if i < len(present_attendees) else ""
+                absent_text = absent_attendees[i] if i < len(absent_attendees) else ""
+                attendance_data.append([present_text, absent_text])
+            
+            attendance_column_widths = [3.25, 3.25]
+            add_styled_table(
+                doc,
+                rows=max_rows + 1,
+                cols=2,
+                headers=["PRESENT", "ABSENT"],
+                data=attendance_data,
+                header_bg_color=(0, 0, 0),
+                header_text_color=(255, 255, 255),
+                alt_row_bg_color=(192, 192, 192),
+                column_widths=attendance_column_widths,
+                table_width=6.5
+            )
+        else:
+            add_styled_paragraph(
+                doc,
+                "No attendance specified.",
+                font_name="Century",
+                font_size=12
+            )
+
+        # Add agenda items
+        add_styled_paragraph(
+            doc,
+            "◆ Agenda",
+            font_name="Century",
+            font_size=12,
+            bold=True
+        )
+        for item in agenda_list:
+            add_styled_paragraph(
+                doc,
+                item,
+                font_name="Century",
+                font_size=12
+            )
+
+        # Add resolutions summary
+        resolutions = extracted_info.get("resolutions_summary", [])
+        if not resolutions:
+            resolutions = [{
+                "date": extracted_info.get("date", ""),
+                "dossier": "Not specified",
+                "resolution": "Not specified",
+                "responsible": "Not specified",
+                "deadline": "Not specified",
+                "execution_date": "",
+                "status": "In progress",
+                "report_count": "0"
+            }]
+        add_styled_paragraph(
+            doc,
+            "RESOLUTIONS SUMMARY",
+            font_name="Century",
+            font_size=12,
+            bold=True,
+            color=RGBColor(192, 0, 0)
+        )
+        resolutions_headers = ["DATE", "DOSSIER", "RESOLUTION", "RESP.", "DEADLINE", "EXECUTION DATE", "STATUS", "REPORT COUNT"]
+        resolutions_data = []
+        for resolution in resolutions:
+            row_data = [
+                resolution.get("date", ""),
+                resolution.get("dossier", ""),
+                resolution.get("resolution", ""),
+                resolution.get("responsible", ""),
+                resolution.get("deadline", ""),
+                resolution.get("execution_date", ""),
+                resolution.get("status", ""),
+                str(resolution.get("report_count", ""))
+            ]
+            resolutions_data.append(row_data)
+        resolutions_column_widths = [0.9, 1.2, 1.8, 0.8, 1.2, 0.9, 0.8, 0.9]
+        add_styled_table(
+            doc,
+            rows=len(resolutions) + 1,
+            cols=8,
+            headers=resolutions_headers,
+            data=resolutions_data,
+            header_bg_color=(0, 0, 0),
+            header_text_color=(255, 255, 255),
+            alt_row_bg_color=(192, 192, 192),
+            column_widths=resolutions_column_widths,
+            table_width=7.5
+        )
+
+        # Add sanctions summary
+        sanctions = extracted_info.get("sanctions_summary", [])
+        if not sanctions:
+            sanctions = [{
+                "name": "None",
+                "reason": "No sanctions mentioned",
+                "amount": "0",
+                "date": extracted_info.get("date", ""),
+                "status": "Not applied"
+            }]
+        add_styled_paragraph(
+            doc,
+            "SANCTIONS SUMMARY",
+            font_name="Century",
+            font_size=12,
+            bold=True,
+            color=RGBColor(192, 0, 0)
+        )
+        sanctions_headers = ["NAME", "REASON", "AMOUNT (FCFA)", "DATE", "STATUS"]
+        sanctions_data = []
+        for sanction in sanctions:
+            row_data = [
+                sanction.get("name", ""),
+                sanction.get("reason", ""),
+                sanction.get("amount", ""),
+                sanction.get("date", ""),
+                sanction.get("status", "")
+            ]
+            sanctions_data.append(row_data)
+        sanctions_column_widths = [1.5, 1.8, 1.4, 1.2, 1.6]
+        add_styled_table(
+            doc,
+            rows=len(sanctions) + 1,
+            cols=5,
+            headers=sanctions_headers,
+            data=sanctions_data,
+            header_bg_color=(0, 0, 0),
+            header_text_color=(255, 255, 255),
+            alt_row_bg_color=(192, 192, 192),
+            column_widths=sanctions_column_widths,
+            table_width=7.5
+        )
+
+        # Add balance information
+        add_styled_paragraph(
+            doc,
+            f"DRI Solidarity account balance (00001-00921711101-10) is XAF {extracted_info.get('balance_amount', 'Not specified')} as of {extracted_info.get('balance_date', '')}.",
+            font_name="Century",
+            font_size=12
+        )
+
+        # Save the document to a temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             doc.save(tmp.name)
             with open(tmp.name, "rb") as f:
                 docx_data = f.read()
             os.unlink(tmp.name)
         return docx_data
+
     except Exception as e:
         st.error(f"Error generating Word document: {e}")
         return None
@@ -241,27 +597,44 @@ def main():
     st.sidebar.header("Previous Context")
     previous_report = st.sidebar.file_uploader("Upload Previous Report (optional)", type=["pdf", "png", "jpg", "jpeg"])
     if previous_report:
-        status_text = st.sidebar.empty()
-        status_text.text("Extracting context...")
-        context = extract_context_from_report(previous_report, st.session_state.mistral_api_key)
-        status_text.text("Context extracted successfully!")
-        st.session_state.previous_context = context
-        st.sidebar.text_area("Extracted Context", context, height=200)
+        st.session_state.previous_report = previous_report
+        st.session_state.previous_context = ""  # Reset context until a question is asked
+        st.sidebar.write("Previous report uploaded. Ask a question to extract context.")
     else:
+        st.session_state.previous_report = None
         st.session_state.previous_context = ""
     
     # Section to ask questions about the context
     st.sidebar.header("Test the Context")
-    question = st.sidebar.text_input("Ask a question about the extracted context:")
-    if st.sidebar.button("Ask Question") and question and 'previous_context' in st.session_state and st.session_state.previous_context:
-        with st.spinner("Getting answer..."):
-            answer = answer_question_with_context(
-                question, 
-                st.session_state.previous_context, 
-                st.session_state.deepseek_api_key
-            )
-        st.sidebar.write("**Answer:**")
-        st.sidebar.write(answer)
+    question = st.sidebar.text_input("Ask a question about the previous report:")
+    if st.sidebar.button("Ask Question") and question:
+        if not st.session_state.mistral_api_key:
+            st.sidebar.error("Please provide a Mistral API key to extract context.")
+        elif not st.session_state.previous_report:
+            st.sidebar.error("Please upload a previous report to extract context.")
+        else:
+            with st.spinner("Extracting context..."):
+                context = extract_context_from_report(
+                    st.session_state.previous_report, 
+                    st.session_state.mistral_api_key
+                )
+                if context:
+                    st.session_state.previous_context = context
+                    st.sidebar.text_area("Extracted Context", context, height=200)
+                    st.sidebar.success("Context extracted successfully!")
+                else:
+                    st.session_state.previous_context = ""
+                    st.sidebar.error("Failed to extract context. Check the API key or file.")
+            
+            # Now answer the question
+            with st.spinner("Getting answer..."):
+                answer = answer_question_with_context(
+                    question, 
+                    st.session_state.previous_context, 
+                    st.session_state.deepseek_api_key
+                )
+            st.sidebar.write("**Answer:**")
+            st.sidebar.write(answer)
     
     # Main app content
     col1, col2 = st.columns(2)
