@@ -173,6 +173,11 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     1. For each speaker, identify their dossier(s), dates, resolutions, responsible party, deadline, status, and report count.
     2. If information is missing, use reasonable defaults (e.g., "Not specified" or provided date: {date}).
     3. Ensure JSON is well-formed and dates follow DD/MM/YYYY format.
+    4. If you cannot extract the information or encounter any issues, return a JSON object with a single key "error" explaining the issue (e.g., {{"error": "Unable to parse transcription"}}).
+    5. Return the result as a single, valid JSON object. Do not include any additional text, explanations, or comments outside the JSON.
+
+    **Example Output**:
+    {{"presence_list": "Present: Alice, Bob\nAbsent: Charlie", "agenda_items": "1. Review of minutes\n2. Resolutions", "resolutions_summary": [{{"date": "14/05/2025", "dossier": "Project X", "resolution": "Complete report", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "In progress", "report_count": "0"}}], "sanctions_summary": [], "start_time": "10h00min", "end_time": "11h00min", "rapporteur": "Bob", "president": "Alice", "balance_amount": "827540", "balance_date": "14/05/2025"}}
 
     Return the result as structured JSON in English.
     """
@@ -193,19 +198,37 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             json=payload
         )
         if response.status_code == 200:
-            raw_response = response.json()["choices"][0]["message"]["content"].strip()
-            st.write(f"Raw Deepseek response: {raw_response}")
-            try:
-                extracted_data = json.loads(raw_response)
-                extracted_data["date"] = date
-                extracted_data["meeting_title"] = meeting_title  # Add meeting_title for document generation
-                return extracted_data
-            except json.JSONDecodeError as e:
-                st.error(f"Error parsing JSON: {e}")
+            # Log the full response for debugging
+            full_response = response.json()
+            st.write(f"Full Deepseek response: {full_response}")
+            
+            # Extract the content
+            raw_response = full_response["choices"][0]["message"]["content"].strip()
+            st.write(f"Raw Deepseek response content: {raw_response}")
+            
+            # Validate the response before parsing
+            if not raw_response:
+                st.error("Deepseek API returned an empty response.")
                 return None
+            
+            # Attempt to parse the response as JSON
+            extracted_data = json.loads(raw_response)
+            
+            # Check if the response contains an error key
+            if "error" in extracted_data:
+                st.error(f"Deepseek API error: {extracted_data['error']}")
+                return None
+            
+            # Add meeting metadata
+            extracted_data["date"] = date
+            extracted_data["meeting_title"] = meeting_title
+            return extracted_data
         else:
             st.error(f"Deepseek API error: Status {response.status_code}, Message: {response.text}")
             return None
+    except json.JSONDecodeError as e:
+        st.error(f"Error parsing JSON: {e}")
+        return None
     except Exception as e:
         st.error(f"Error extracting information: {e}")
         return None
