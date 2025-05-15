@@ -295,8 +295,8 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
 
     # Extract rapporteur and president
-    rapporteur_match = re.search(r"(Rapporteur|Rapporteuse)[:\s]*([A-Z][a-z]+)", transcription, re.IGNORECASE)
-    president_match = re.search(r"(Président|Présidente|Prési)[:\s]*([A-Z][a-z]+)", transcription, re.IGNORECASE)
+    rapporteur_match = re.search(r"(Rapporteur|Rapporteuse)[:\s]*([A-Z][a-z]+(?: [A-Z][a-z]+)?)", transcription, re.IGNORECASE)
+    president_match = re.search(r"(Président|Présidente|Prési)[:\s]*([A-Z][a-z]+(?: [A-Z][a-z]+)?)", transcription, re.IGNORECASE)
     if rapporteur_match:
         extracted_data["rapporteur"] = rapporteur_match.group(2)
     if president_match:
@@ -320,7 +320,7 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         activities = []
         for line in activities_lines:
             # Split the line into parts based on typical separators (e.g., "par", "sur", "résultat", etc.)
-            actor_match = re.search(r"^[A-Z][a-z]+|^([A-Z][a-z]+)[\s,]", line)
+            actor_match = re.search(r"^[A-Z][a-z]+|^([A-Z][a-z]+(?: [A-Z][a-z]+)?)[\s,]", line)
             dossier_match = re.search(r"(?:dossier|sur le dossier) ([A-Za-z0-9\s]+)", line, re.IGNORECASE)
             activities_match = re.search(r"(?:activités|menées) ([A-Za-z\s,]+)", line, re.IGNORECASE)
             results_match = re.search(r"(?:résultat|obtenu) ([A-Za-z\s,]+)", line, re.IGNORECASE)
@@ -350,7 +350,7 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         resolutions = []
         for res in resolution_lines:
             # Try to extract responsible person and deadline
-            responsible_match = re.search(r"(?:par|responsable|attribué à) ([A-Z][a-z]+)", res, re.IGNORECASE)
+            responsible_match = re.search(r"(?:par|responsable|attribué à) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)", res, re.IGNORECASE)
             deadline_match = re.search(r"(?:d'ici|avant le) (\d{2}/\d{2}/\d{4})", res, re.IGNORECASE)
             responsible = responsible_match.group(1) if responsible_match else "Non spécifié"
             deadline = deadline_match.group(1) if deadline_match else "Non spécifié"
@@ -373,7 +373,7 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         sanction_lines = [line.strip() for line in sanction_text.split("\n") if line.strip()]
         sanctions = []
         for sanc in sanction_lines:
-            name_match = re.search(r"^[A-Z][a-z]+|^([A-Z][a-z]+)[\s,]", sanc)
+            name_match = re.search(r"^[A-Z][a-z]+|^([A-Z][a-z]+(?: [A-Z][a-z]+)?)[\s,]", sanc)
             amount_match = re.search(r"(\d+)\s*(?:FCFA|XAF)?", sanc)
             reason_match = re.search(r"(?:pour|raison) ([a-zA-Z\s]+)", sanc, re.IGNORECASE)
             name = name_match.group(1) if name_match else "Non spécifié"
@@ -388,8 +388,41 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             })
         extracted_data["sanctions_summary"] = sanctions
     else:
-        # If no sanctions found in transcript, the API will handle extraction from context
-        extracted_data["sanctions_summary"] = []
+        # If no sanctions found in transcript, extract from previous context
+        if previous_context and previous_context != "Aucun contexte disponible.":
+            sanctions = []
+            # Look for "RÉCAPITULATIF DES SANCTIONS" section in the context
+            sanction_section = re.search(r"RÉCAPITULATIF DES SANCTIONS([\s\S]*?)(?=\n[A-Z]+:|\Z)", previous_context, re.IGNORECASE)
+            if sanction_section:
+                sanction_text = sanction_section.group(1).strip()
+                # Split into lines, assuming each line after the header is a sanction entry
+                sanction_lines = [line.strip() for line in sanction_text.split("\n") if line.strip()]
+                # Skip the header row (NOM | RAISON | MONTANT (FCFA) | DATE | STATUT)
+                if sanction_lines and "NOM" in sanction_lines[0].upper():
+                    sanction_lines = sanction_lines[1:]  # Skip header
+                
+                for line in sanction_lines:
+                    # Split the line into columns based on typical separators (e.g., "|", spaces)
+                    parts = [part.strip() for part in re.split(r'\s*\|\s*|\s{2,}', line)]
+                    if len(parts) >= 5:
+                        sanctions.append({
+                            "name": parts[0] if parts[0] else "Non spécifié",
+                            "reason": parts[1] if parts[1] else "Non spécifié",
+                            "amount": parts[2].replace(" FCFA", "") if parts[2] else "0",
+                            "date": date,  # Use the current meeting date
+                            "status": parts[4] if parts[4] else "Appliquée"
+                        })
+            
+            # If no sanctions found in context, use default
+            if not sanctions:
+                sanctions = [{
+                    "name": "Aucune",
+                    "reason": "Aucune sanction mentionnée",
+                    "amount": "0",
+                    "date": date,
+                    "status": "Non appliquée"
+                }]
+            extracted_data["sanctions_summary"] = sanctions
 
     return extracted_data
 
@@ -442,6 +475,8 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
        - Par défaut : "Non spécifié".
 
     5. **start_time** et **end_time** : Heure de début et fin (format HHhMMmin, ex. "10h00min").
+       - Recherchez les mentions explicites de l'heure de fin (mots-clés : "fin", "terminée", "terminé", "ended").
+       - Si l'heure de fin n'est pas spécifiée, calculez-la en additionnant la durée de la réunion (mots-clés : "durée", "dure", "duré", "lasted") à l'heure de début.
        - Par défaut : "Non spécifié".
 
     6. **balance_amount** : Solde du compte (mots-clés : "solde", "compte", "balance").
@@ -473,6 +508,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
           - Dans le contexte, les sanctions sont présentées dans un tableau avec les colonnes : NOM | RAISON | MONTANT (FCFA) | DATE | STATUT.
           - Mappez ces colonnes aux clés : "name" (NOM), "reason" (RAISON), "amount" (MONTANT, sans "FCFA"), "date" (utilisez la date de la réunion actuelle : {date}), "status" (STATUT).
           - Ignorez la ligne d'en-tête du tableau (NOM | RAISON | etc.) et extrayez uniquement les lignes de données.
+          - Assurez-vous d'extraire toutes les sanctions disponibles dans le contexte, même si elles sont sur plusieurs lignes.
           - Si aucune sanction n'est trouvée dans le contexte, utilisez les valeurs par défaut.
 
     **Exemple de sortie** :
@@ -677,17 +713,30 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         presence_list = extracted_info.get("presence_list", "Présents: Non spécifié\nAbsents: Non spécifié")
         present_attendees = []
         absent_attendees = []
+        president = extracted_info.get("president", "Non spécifié")
         if "Présents:" in presence_list and "Absents:" in presence_list:
             parts = presence_list.split("\n")
             for part in parts:
                 if part.startswith("Présents:"):
                     presents = part.replace("Présents:", "").strip()
                     present_attendees = [name.strip() for name in presents.split(",") if name.strip()]
+                    # Add "(Président)" to the president's name if they are in the present list
+                    if president != "Non spécifié":
+                        for i, attendee in enumerate(present_attendees):
+                            if attendee.lower() == president.lower():
+                                present_attendees[i] = f"{attendee} (Président)"
+                                break
                 elif part.startswith("Absents:"):
                     absents = part.replace("Absents:", "").strip()
                     absent_attendees = [name.strip() for name in absents.split(",") if name.strip()]
         else:
             present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Non spécifié" else []
+            # Add "(Président)" to the president's name if they are in the present list
+            if president != "Non spécifié":
+                for i, attendee in enumerate(present_attendees):
+                    if attendee.lower() == president.lower():
+                        present_attendees[i] = f"{attendee} (Président)"
+                        break
 
         # Process agenda items
         agenda_list = extracted_info.get("agenda_items", "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers").split("\n")
@@ -742,22 +791,12 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             alignment=WD_ALIGN_PARAGRAPH.CENTER
         )
 
-        # Add rapporteur and president
+        # Add rapporteur
         rapporteur = extracted_info.get("rapporteur", "Non spécifié")
-        president = extracted_info.get("president", "Non spécifié")
         if rapporteur != "Non spécifié":
             add_styled_paragraph(
                 doc,
                 f"Rapporteur: {rapporteur}",
-                font_name="Century",
-                font_size=12,
-                bold=True,
-                alignment=WD_ALIGN_PARAGRAPH.CENTER
-            )
-        if president != "Non spécifié":
-            add_styled_paragraph(
-                doc,
-                f"Président de la réunion: {president}",
                 font_name="Century",
                 font_size=12,
                 bold=True,
@@ -855,7 +894,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 activity.get("perspectives", "")
             ]
             activities_data.append(row_data)
-        activities_column_widths = [2.0, 2.0, 2.5, 2.0, 2.0]  # Adjusted for readability
+        activities_column_widths = [2.0, 2.0, 2.5, 2.0, 2.0]
         add_styled_table(
             doc,
             rows=len(activities) + 1,
