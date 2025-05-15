@@ -209,7 +209,43 @@ def clean_json_response(response):
     st.write(f"Cleaned response: {repr(response)}")
     return response
 
-def extract_info_fallback(transcription, meeting_title, date):
+def extract_sanctions_from_context(context, date):
+    """Extract sanctions from the previous meeting context if available."""
+    sanctions = []
+    # Look for "RÉSUMÉ DES SANCTIONS" section in the context
+    sanction_section = re.search(r"RÉSUMÉ DES SANCTIONS([\s\S]*?)(?=\n◆|\Z)", context, re.IGNORECASE)
+    if sanction_section:
+        sanction_text = sanction_section.group(1).strip()
+        # Split into lines, assuming each line after the header is a sanction entry
+        sanction_lines = [line.strip() for line in sanction_text.split("\n") if line.strip()]
+        # Skip the header row (NOM | RAISON | MONTANT (FCFA) | DATE | STATUT)
+        if sanction_lines and "NOM" in sanction_lines[0].upper():
+            sanction_lines = sanction_lines[1:]  # Skip header
+        
+        for line in sanction_lines:
+            # Split the line into columns based on typical separators (e.g., "|", spaces)
+            parts = [part.strip() for part in re.split(r'\s*\|\s*|\s{2,}', line)]
+            if len(parts) >= 5:
+                sanctions.append({
+                    "name": parts[0] if parts[0] else "Non spécifié",
+                    "reason": parts[1] if parts[1] else "Non spécifié",
+                    "amount": parts[2].replace(" FCFA", "") if parts[2] else "0",
+                    "date": date,  # Use the current meeting date
+                    "status": parts[4] if parts[4] else "Appliquée"
+                })
+    
+    # If no sanctions found in context, return default
+    if not sanctions:
+        sanctions = [{
+            "name": "Aucune",
+            "reason": "Aucune sanction mentionnée",
+            "amount": "0",
+            "date": date,
+            "status": "Non appliquée"
+        }]
+    return sanctions
+
+def extract_info_fallback(transcription, meeting_title, date, previous_context=""):
     """Fallback function to extract information using improved string parsing and regex."""
     extracted_data = {
         "presence_list": "Présents: Non spécifié\nAbsents: Non spécifié",
@@ -357,6 +393,10 @@ def extract_info_fallback(transcription, meeting_title, date):
                 "status": "Appliquée"
             })
         extracted_data["sanctions_summary"] = sanctions
+    else:
+        # If no sanctions found in transcript, use previous context
+        if previous_context and previous_context != "Aucun contexte disponible.":
+            extracted_data["sanctions_summary"] = extract_sanctions_from_context(previous_context, date)
 
     return extracted_data
 
@@ -371,7 +411,7 @@ def to_roman(num):
 def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context=""):
     """Extract key information from the transcription using Deepseek API with previous context."""
     if not transcription or not deepseek_api_key:
-        return extract_info_fallback(transcription, meeting_title, date)
+        return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
     prompt = f"""
     Vous êtes un assistant IA chargé d'extraire des informations clés d'un transcript de réunion en français pour une institution bancaire. Votre tâche est de produire un JSON structuré avec des clés en anglais. Vous devez TOUJOURS retourner un JSON valide, même en cas d'échec.
@@ -439,7 +479,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 4000
+            "max_tokens": 5000  # Increased from 4000 to 5000
         }
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
@@ -448,7 +488,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         )
         if response.status_code != 200:
             st.error(f"Deepseek API error: Status {response.status_code}, Message: {response.text}. Falling back to basic extraction.")
-            return extract_info_fallback(transcription, meeting_title, date)
+            return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
         # Log the full response for debugging
         full_response = response.json()
@@ -461,7 +501,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         cleaned_response = clean_json_response(raw_response)
         if cleaned_response is None:
             st.error("Failed to clean API response into valid JSON. Falling back to basic extraction.")
-            return extract_info_fallback(transcription, meeting_title, date)
+            return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
         # Count tokens in the API response and the cleaned response
         api_tokens = full_response.get("usage", {}).get("completion_tokens", 0)
@@ -477,7 +517,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         # Check if the response contains an error key
         if "error" in extracted_data:
             st.error(f"Deepseek API error: {extracted_data['error']}. Falling back to basic extraction.")
-            return extract_info_fallback(transcription, meeting_title, date)
+            return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
         # If end_time is "Non spécifié" but start_time and duration are available, calculate end_time
         if extracted_data.get("end_time") == "Non spécifié":
@@ -505,6 +545,12 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
                 duration_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
                 end_time = start_time + duration_delta
                 extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
+
+        # If no sanctions were extracted, use previous context
+        sanctions = extracted_data.get("sanctions_summary", [])
+        if not sanctions or (len(sanctions) == 1 and sanctions[0].get("name") == "Aucune"):
+            if previous_context and previous_context != "Aucun contexte disponible.":
+                extracted_data["sanctions_summary"] = extract_sanctions_from_context(previous_context, date)
         
         # Add meeting metadata
         extracted_data["date"] = date
@@ -513,10 +559,10 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
 
     except json.JSONDecodeError as e:
         st.error(f"Error parsing JSON after cleaning: {e}. Cleaned response: {repr(cleaned_response)}. Falling back to basic extraction.")
-        return extract_info_fallback(transcription, meeting_title, date)
+        return extract_info_fallback(transcription, meeting_title, date, previous_context)
     except Exception as e:
         st.error(f"Error extracting information: {e}. Falling back to basic extraction.")
-        return extract_info_fallback(transcription, meeting_title, date)
+        return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
 def set_cell_background(cell, rgb_color):
     """Set the background color of a table cell using RGB values."""
@@ -716,6 +762,9 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 alignment=WD_ALIGN_PARAGRAPH.CENTER
             )
 
+        # Add page break before "Liste de Présence"
+        doc.add_page_break()
+
         # Add attendance table
         add_styled_paragraph(
             doc,
@@ -735,8 +784,8 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 absent_text = absent_attendees[i] if i < len(absent_attendees) else ""
                 attendance_data.append([present_text, absent_text])
             
-            # Increased column widths and table width
-            attendance_column_widths = [4.0, 4.0]  # Increased from [3.25, 3.25]
+            # Further increased column widths and table width
+            attendance_column_widths = [4.5, 4.5]  # Increased from [4.0, 4.0]
             add_styled_table(
                 doc,
                 rows=max_rows + 1,
@@ -747,7 +796,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 header_text_color=(255, 255, 255),
                 alt_row_bg_color=(192, 192, 192),
                 column_widths=attendance_column_widths,
-                table_width=8.0  # Increased from 6.5
+                table_width=9.0  # Increased from 8.0
             )
         else:
             add_styled_paragraph(
@@ -775,6 +824,9 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 font_name="Century",
                 font_size=12
             )
+
+        # Add page break after "Ordre du jour" to isolate it
+        doc.add_page_break()
 
         # Add resolutions summary
         resolutions = extracted_info.get("resolutions_summary", [])
@@ -811,8 +863,8 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 str(resolution.get("report_count", ""))
             ]
             resolutions_data.append(row_data)
-        # Increased column widths and table width
-        resolutions_column_widths = [1.2, 1.5, 2.2, 1.0, 1.5, 1.2, 1.0, 1.2]  # Increased proportionally from [0.9, 1.2, 1.8, 0.8, 1.2, 0.9, 0.8, 0.9]
+        # Further increased column widths and table width
+        resolutions_column_widths = [1.5, 1.8, 2.5, 1.2, 1.8, 1.5, 1.2, 1.5]  # Increased from [1.2, 1.5, 2.2, 1.0, 1.5, 1.2, 1.0, 1.2]
         add_styled_table(
             doc,
             rows=len(resolutions) + 1,
@@ -823,7 +875,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             header_text_color=(255, 255, 255),
             alt_row_bg_color=(192, 192, 192),
             column_widths=resolutions_column_widths,
-            table_width=9.8  # Increased from 7.5
+            table_width=12.0  # Increased from 9.8
         )
 
         # Add sanctions summary
@@ -855,8 +907,8 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 sanction.get("status", "")
             ]
             sanctions_data.append(row_data)
-        # Increased column widths and table width
-        sanctions_column_widths = [1.8, 2.2, 1.8, 1.5, 2.0]  # Increased proportionally from [1.5, 1.8, 1.4, 1.2, 1.6]
+        # Further increased column widths and table width
+        sanctions_column_widths = [2.0, 2.5, 2.0, 1.8, 2.2]  # Increased from [1.8, 2.2, 1.8, 1.5, 2.0]
         add_styled_table(
             doc,
             rows=len(sanctions) + 1,
@@ -867,7 +919,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             header_text_color=(255, 255, 255),
             alt_row_bg_color=(192, 192, 192),
             column_widths=sanctions_column_widths,
-            table_width=9.3  # Increased from 7.5
+            table_width=10.5  # Increased from 9.3
         )
 
         # Add a blank paragraph for spacing
