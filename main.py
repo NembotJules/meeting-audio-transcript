@@ -214,6 +214,7 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
     extracted_data = {
         "presence_list": "Présents: Non spécifié\nAbsents: Non spécifié",
         "agenda_items": "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers",
+        "activities_review": [],
         "resolutions_summary": [],
         "sanctions_summary": [],
         "start_time": "Non spécifié",
@@ -310,6 +311,35 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
     balance_date_match = re.search(r"(solde|compte|balance)[\s\w]*?(\d{2}/\d{2}/\d{4})", transcription, re.IGNORECASE)
     if balance_date_match:
         extracted_data["balance_date"] = balance_date_match.group(2)
+
+    # Extract activities review (Revue des activités)
+    activities_section = re.search(r"(Revue des activités|Activités de la semaine)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
+    if activities_section:
+        activities_text = activities_section.group(2).strip()
+        activities_lines = [line.strip() for line in activities_text.split("\n") if line.strip()]
+        activities = []
+        for line in activities_lines:
+            # Split the line into parts based on typical separators (e.g., "par", "sur", "résultat", etc.)
+            actor_match = re.search(r"^[A-Z][a-z]+|^([A-Z][a-z]+)[\s,]", line)
+            dossier_match = re.search(r"(?:dossier|sur le dossier) ([A-Za-z0-9\s]+)", line, re.IGNORECASE)
+            activities_match = re.search(r"(?:activités|menées) ([A-Za-z\s,]+)", line, re.IGNORECASE)
+            results_match = re.search(r"(?:résultat|obtenu) ([A-Za-z\s,]+)", line, re.IGNORECASE)
+            perspectives_match = re.search(r"(?:perspectives|prévoit de) ([A-Za-z\s,]+)", line, re.IGNORECASE)
+
+            actor = actor_match.group(1) if actor_match else "Non spécifié"
+            dossier = dossier_match.group(1).strip() if dossier_match else "Non spécifié"
+            activities_desc = activities_match.group(1).strip() if activities_match else "Non spécifié"
+            results = results_match.group(1).strip() if results_match else "Non spécifié"
+            perspectives = perspectives_match.group(1).strip() if perspectives_match else "Non spécifié"
+
+            activities.append({
+                "actor": actor,
+                "dossier": dossier,
+                "activities": activities_desc,
+                "results": results,
+                "perspectives": perspectives
+            })
+        extracted_data["activities_review"] = activities
 
     # Extract resolutions (improved)
     resolution_section = re.search(r"(Résolution|Resolutions)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
@@ -420,23 +450,33 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     7. **balance_date** : Date du solde (format JJ/MM/AAAA).
        - Par défaut : {date}.
 
-    8. **resolutions_summary** : Liste de dictionnaires pour les résolutions.
+    8. **activities_review** : Liste de dictionnaires pour la revue des activités.
+       - Recherchez les mentions sous "Revue des activités" ou "Activités de la semaine" dans le transcript.
+       - Clés : "actor", "dossier", "activities", "results", "perspectives".
+       - "actor" : La personne en charge du dossier (qui l'a présenté).
+       - "dossier" : Le dossier sur lequel la personne travaille.
+       - "activities" : Les activités menées par la personne pendant la semaine sur le dossier.
+       - "results" : Les résultats obtenus sur le dossier.
+       - "perspectives" : Les actions prévues dans le futur proche sur le dossier.
+       - Par défaut : "actor": "Non spécifié", "dossier": "Non spécifié", "activities": "Non spécifié", "results": "Non spécifié", "perspectives": "Non spécifié".
+
+    9. **resolutions_summary** : Liste de dictionnaires pour les résolutions.
        - Clés : "date" (JJ/MM/AAAA), "dossier", "resolution", "responsible", "deadline" (JJ/MM/AAAA), "execution_date" (JJ/MM/AAAA), "status", "report_count".
        - Par défaut : "dossier": "Non spécifié", "responsible": "Non spécifié", "deadline": "Non spécifié", "execution_date": "", "status": "En cours", "report_count": "0".
        - Recherchez les mentions sous "Résolution" ou "Resolutions" dans le transcript.
 
-    9. **sanctions_summary** : Liste de dictionnaires pour les sanctions.
-       - Clés : "name", "reason", "amount", "date" (JJ/MM/AAAA), "status".
-       - Par défaut : "name": "Aucune", "reason": "Aucune sanction mentionnée", "amount": "0", "status": "Non appliquée".
-       - Recherchez les mentions sous "Sanction" ou "Amende" dans le transcript.
-       - **Si aucune sanction n'est trouvée dans le transcript**, extrayez les sanctions du **contexte de la réunion précédente** (fourni ci-dessus) sous la section "RÉCAPITULATIF DES SANCTIONS".
-         - Dans le contexte, les sanctions sont présentées dans un tableau avec les colonnes : NOM | RAISON | MONTANT (FCFA) | DATE | STATUT.
-         - Mappez ces colonnes aux clés : "name" (NOM), "reason" (RAISON), "amount" (MONTANT, sans "FCFA"), "date" (utilisez la date de la réunion actuelle : {date}), "status" (STATUT).
-         - Ignorez la ligne d'en-tête du tableau (NOM | RAISON | etc.) et extrayez uniquement les lignes de données.
-         - Si aucune sanction n'est trouvée dans le contexte, utilisez les valeurs par défaut.
+    10. **sanctions_summary** : Liste de dictionnaires pour les sanctions.
+        - Clés : "name", "reason", "amount", "date" (JJ/MM/AAAA), "status".
+        - Par défaut : "name": "Aucune", "reason": "Aucune sanction mentionnée", "amount": "0", "status": "Non appliquée".
+        - Recherchez les mentions sous "Sanction" ou "Amende" dans le transcript.
+        - **Si aucune sanction n'est trouvée dans le transcript**, extrayez les sanctions du **contexte de la réunion précédente** (fourni ci-dessus) sous la section "RÉCAPITULATIF DES SANCTIONS".
+          - Dans le contexte, les sanctions sont présentées dans un tableau avec les colonnes : NOM | RAISON | MONTANT (FCFA) | DATE | STATUT.
+          - Mappez ces colonnes aux clés : "name" (NOM), "reason" (RAISON), "amount" (MONTANT, sans "FCFA"), "date" (utilisez la date de la réunion actuelle : {date}), "status" (STATUT).
+          - Ignorez la ligne d'en-tête du tableau (NOM | RAISON | etc.) et extrayez uniquement les lignes de données.
+          - Si aucune sanction n'est trouvée dans le contexte, utilisez les valeurs par défaut.
 
     **Exemple de sortie** :
-    {{"presence_list": "Présents: Alice, Bob\nAbsents: Charlie", "agenda_items": "I- Revue\nII- Résolutions", "president": "Alice", "rapporteur": "Bob", "start_time": "10h00min", "end_time": "11h00min", "balance_amount": "827540", "balance_date": "15/05/2025", "resolutions_summary": [{{"date": "15/05/2025", "dossier": "Projet X", "resolution": "Finaliser le rapport", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "En cours", "report_count": "0"}}], "sanctions_summary": [{{"name": "Charlie", "reason": "Retard", "amount": "5000", "date": "15/05/2025", "status": "Appliquée"}}]}}
+    {{"presence_list": "Présents: Alice, Bob\nAbsents: Charlie", "agenda_items": "I- Revue\nII- Résolutions", "president": "Alice", "rapporteur": "Bob", "start_time": "10h00min", "end_time": "11h00min", "balance_amount": "827540", "balance_date": "15/05/2025", "activities_review": [{{"actor": "Alice", "dossier": "Projet A", "activities": "Analyse des données", "results": "Rapport préliminaire terminé", "perspectives": "Planification de la phase 2"}}], "resolutions_summary": [{{"date": "15/05/2025", "dossier": "Projet X", "resolution": "Finaliser le rapport", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "En cours", "report_count": "0"}}], "sanctions_summary": [{{"name": "Charlie", "reason": "Retard", "amount": "5000", "date": "15/05/2025", "status": "Appliquée"}}]}}
     """
     try:
         headers = {
@@ -724,7 +764,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 alignment=WD_ALIGN_PARAGRAPH.CENTER
             )
 
-        # Add attendance table (no page break, back to original position)
+        # Add attendance table
         add_styled_paragraph(
             doc,
             "◆ LISTE DE PRÉSENCE",
@@ -786,6 +826,49 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         # Add page break after "Ordre du jour" to isolate it
         doc.add_page_break()
 
+        # Add activities review table
+        activities = extracted_info.get("activities_review", [])
+        if not activities:
+            activities = [{
+                "actor": "Non spécifié",
+                "dossier": "Non spécifié",
+                "activities": "Non spécifié",
+                "results": "Non spécifié",
+                "perspectives": "Non spécifié"
+            }]
+        add_styled_paragraph(
+            doc,
+            "REVUE DES ACTIVITÉS",
+            font_name="Century",
+            font_size=12,
+            bold=True,
+            color=RGBColor(192, 0, 0)
+        )
+        activities_headers = ["ACTEURS", "DOSSIERS", "ACTIVITÉS", "RÉSULTATS", "PERSPECTIVES"]
+        activities_data = []
+        for activity in activities:
+            row_data = [
+                activity.get("actor", ""),
+                activity.get("dossier", ""),
+                activity.get("activities", ""),
+                activity.get("results", ""),
+                activity.get("perspectives", "")
+            ]
+            activities_data.append(row_data)
+        activities_column_widths = [2.0, 2.0, 2.5, 2.0, 2.0]  # Adjusted for readability
+        add_styled_table(
+            doc,
+            rows=len(activities) + 1,
+            cols=5,
+            headers=activities_headers,
+            data=activities_data,
+            header_bg_color=(0, 0, 0),
+            header_text_color=(255, 255, 255),
+            alt_row_bg_color=(192, 192, 192),
+            column_widths=activities_column_widths,
+            table_width=10.5
+        )
+
         # Add resolutions summary
         resolutions = extracted_info.get("resolutions_summary", [])
         if not resolutions:
@@ -801,7 +884,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             }]
         add_styled_paragraph(
             doc,
-            "RÉCAPITULATIF DES RÉSOLUTIONS",  # Updated from "RÉSUMÉ DES RÉSOLUTIONS"
+            "RÉCAPITULATIF DES RÉSOLUTIONS",
             font_name="Century",
             font_size=12,
             bold=True,
@@ -847,7 +930,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             }]
         add_styled_paragraph(
             doc,
-            "RÉCAPITULATIF DES SANCTIONS",  # Updated from "RÉSUMÉ DES SANCTIONS"
+            "RÉCAPITULATIF DES SANCTIONS",
             font_name="Century",
             font_size=12,
             bold=True,
