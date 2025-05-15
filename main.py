@@ -209,42 +209,6 @@ def clean_json_response(response):
     st.write(f"Cleaned response: {repr(response)}")
     return response
 
-def extract_sanctions_from_context(context, date):
-    """Extract sanctions from the previous meeting context if available."""
-    sanctions = []
-    # Look for "RÉSUMÉ DES SANCTIONS" section in the context
-    sanction_section = re.search(r"RÉSUMÉ DES SANCTIONS([\s\S]*?)(?=\n◆|\Z)", context, re.IGNORECASE)
-    if sanction_section:
-        sanction_text = sanction_section.group(1).strip()
-        # Split into lines, assuming each line after the header is a sanction entry
-        sanction_lines = [line.strip() for line in sanction_text.split("\n") if line.strip()]
-        # Skip the header row (NOM | RAISON | MONTANT (FCFA) | DATE | STATUT)
-        if sanction_lines and "NOM" in sanction_lines[0].upper():
-            sanction_lines = sanction_lines[1:]  # Skip header
-        
-        for line in sanction_lines:
-            # Split the line into columns based on typical separators (e.g., "|", spaces)
-            parts = [part.strip() for part in re.split(r'\s*\|\s*|\s{2,}', line)]
-            if len(parts) >= 5:
-                sanctions.append({
-                    "name": parts[0] if parts[0] else "Non spécifié",
-                    "reason": parts[1] if parts[1] else "Non spécifié",
-                    "amount": parts[2].replace(" FCFA", "") if parts[2] else "0",
-                    "date": date,  # Use the current meeting date
-                    "status": parts[4] if parts[4] else "Appliquée"
-                })
-    
-    # If no sanctions found in context, return default
-    if not sanctions:
-        sanctions = [{
-            "name": "Aucune",
-            "reason": "Aucune sanction mentionnée",
-            "amount": "0",
-            "date": date,
-            "status": "Non appliquée"
-        }]
-    return sanctions
-
 def extract_info_fallback(transcription, meeting_title, date, previous_context=""):
     """Fallback function to extract information using improved string parsing and regex."""
     extracted_data = {
@@ -394,9 +358,8 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             })
         extracted_data["sanctions_summary"] = sanctions
     else:
-        # If no sanctions found in transcript, use previous context
-        if previous_context and previous_context != "Aucun contexte disponible.":
-            extracted_data["sanctions_summary"] = extract_sanctions_from_context(previous_context, date)
+        # If no sanctions found in transcript, the API will handle extraction from context
+        extracted_data["sanctions_summary"] = []
 
     return extracted_data
 
@@ -416,10 +379,8 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     prompt = f"""
     Vous êtes un assistant IA chargé d'extraire des informations clés d'un transcript de réunion en français pour une institution bancaire. Votre tâche est de produire un JSON structuré avec des clés en anglais. Vous devez TOUJOURS retourner un JSON valide, même en cas d'échec.
 
-    **Contexte de la réunion suivante** :
+    **Contexte de la réunion précédente** :
     {previous_context if previous_context else "Aucun contexte disponible."}
-
-    Utilisez ce contexte uniquement pour les résolutions et sanctions, et non pour la liste des présents/absents.
 
     **Transcript de la réunion** :
     {transcription}
@@ -462,10 +423,17 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     8. **resolutions_summary** : Liste de dictionnaires pour les résolutions.
        - Clés : "date" (JJ/MM/AAAA), "dossier", "resolution", "responsible", "deadline" (JJ/MM/AAAA), "execution_date" (JJ/MM/AAAA), "status", "report_count".
        - Par défaut : "dossier": "Non spécifié", "responsible": "Non spécifié", "deadline": "Non spécifié", "execution_date": "", "status": "En cours", "report_count": "0".
+       - Recherchez les mentions sous "Résolution" ou "Resolutions" dans le transcript.
 
     9. **sanctions_summary** : Liste de dictionnaires pour les sanctions.
        - Clés : "name", "reason", "amount", "date" (JJ/MM/AAAA), "status".
-       - Par défaut : "name": "Non spécifié", "reason": "Non spécifié", "amount": "0", "status": "Appliquée".
+       - Par défaut : "name": "Aucune", "reason": "Aucune sanction mentionnée", "amount": "0", "status": "Non appliquée".
+       - Recherchez les mentions sous "Sanction" ou "Amende" dans le transcript.
+       - **Si aucune sanction n'est trouvée dans le transcript**, extrayez les sanctions du **contexte de la réunion précédente** (fourni ci-dessus) sous la section "RÉCAPITULATIF DES SANCTIONS".
+         - Dans le contexte, les sanctions sont présentées dans un tableau avec les colonnes : NOM | RAISON | MONTANT (FCFA) | DATE | STATUT.
+         - Mappez ces colonnes aux clés : "name" (NOM), "reason" (RAISON), "amount" (MONTANT, sans "FCFA"), "date" (utilisez la date de la réunion actuelle : {date}), "status" (STATUT).
+         - Ignorez la ligne d'en-tête du tableau (NOM | RAISON | etc.) et extrayez uniquement les lignes de données.
+         - Si aucune sanction n'est trouvée dans le contexte, utilisez les valeurs par défaut.
 
     **Exemple de sortie** :
     {{"presence_list": "Présents: Alice, Bob\nAbsents: Charlie", "agenda_items": "I- Revue\nII- Résolutions", "president": "Alice", "rapporteur": "Bob", "start_time": "10h00min", "end_time": "11h00min", "balance_amount": "827540", "balance_date": "15/05/2025", "resolutions_summary": [{{"date": "15/05/2025", "dossier": "Projet X", "resolution": "Finaliser le rapport", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "En cours", "report_count": "0"}}], "sanctions_summary": [{{"name": "Charlie", "reason": "Retard", "amount": "5000", "date": "15/05/2025", "status": "Appliquée"}}]}}
@@ -479,7 +447,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 5000  # Increased from 4000 to 5000
+            "max_tokens": 5000
         }
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
@@ -545,12 +513,6 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
                 duration_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
                 end_time = start_time + duration_delta
                 extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
-
-        # If no sanctions were extracted, use previous context
-        sanctions = extracted_data.get("sanctions_summary", [])
-        if not sanctions or (len(sanctions) == 1 and sanctions[0].get("name") == "Aucune"):
-            if previous_context and previous_context != "Aucun contexte disponible.":
-                extracted_data["sanctions_summary"] = extract_sanctions_from_context(previous_context, date)
         
         # Add meeting metadata
         extracted_data["date"] = date
@@ -762,10 +724,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 alignment=WD_ALIGN_PARAGRAPH.CENTER
             )
 
-        # Add page break before "Liste de Présence"
-        doc.add_page_break()
-
-        # Add attendance table
+        # Add attendance table (no page break, back to original position)
         add_styled_paragraph(
             doc,
             "◆ LISTE DE PRÉSENCE",
@@ -784,8 +743,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 absent_text = absent_attendees[i] if i < len(absent_attendees) else ""
                 attendance_data.append([present_text, absent_text])
             
-            # Further increased column widths and table width
-            attendance_column_widths = [4.5, 4.5]  # Increased from [4.0, 4.0]
+            attendance_column_widths = [4.5, 4.5]
             add_styled_table(
                 doc,
                 rows=max_rows + 1,
@@ -796,7 +754,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 header_text_color=(255, 255, 255),
                 alt_row_bg_color=(192, 192, 192),
                 column_widths=attendance_column_widths,
-                table_width=9.0  # Increased from 8.0
+                table_width=9.0
             )
         else:
             add_styled_paragraph(
@@ -843,7 +801,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             }]
         add_styled_paragraph(
             doc,
-            "RÉSUMÉ DES RÉSOLUTIONS",
+            "RÉCAPITULATIF DES RÉSOLUTIONS",  # Updated from "RÉSUMÉ DES RÉSOLUTIONS"
             font_name="Century",
             font_size=12,
             bold=True,
@@ -863,8 +821,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 str(resolution.get("report_count", ""))
             ]
             resolutions_data.append(row_data)
-        # Further increased column widths and table width
-        resolutions_column_widths = [1.5, 1.8, 2.5, 1.2, 1.8, 1.5, 1.2, 1.5]  # Increased from [1.2, 1.5, 2.2, 1.0, 1.5, 1.2, 1.0, 1.2]
+        resolutions_column_widths = [1.5, 1.8, 2.5, 1.2, 1.8, 1.5, 1.2, 1.5]
         add_styled_table(
             doc,
             rows=len(resolutions) + 1,
@@ -875,7 +832,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             header_text_color=(255, 255, 255),
             alt_row_bg_color=(192, 192, 192),
             column_widths=resolutions_column_widths,
-            table_width=12.0  # Increased from 9.8
+            table_width=12.0
         )
 
         # Add sanctions summary
@@ -890,7 +847,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             }]
         add_styled_paragraph(
             doc,
-            "RÉSUMÉ DES SANCTIONS",
+            "RÉCAPITULATIF DES SANCTIONS",  # Updated from "RÉSUMÉ DES SANCTIONS"
             font_name="Century",
             font_size=12,
             bold=True,
@@ -907,8 +864,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 sanction.get("status", "")
             ]
             sanctions_data.append(row_data)
-        # Further increased column widths and table width
-        sanctions_column_widths = [2.0, 2.5, 2.0, 1.8, 2.2]  # Increased from [1.8, 2.2, 1.8, 1.5, 2.0]
+        sanctions_column_widths = [2.0, 2.5, 2.0, 1.8, 2.2]
         add_styled_table(
             doc,
             rows=len(sanctions) + 1,
@@ -919,7 +875,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             header_text_color=(255, 255, 255),
             alt_row_bg_color=(192, 192, 192),
             column_widths=sanctions_column_widths,
-            table_width=10.5  # Increased from 9.3
+            table_width=10.5
         )
 
         # Add a blank paragraph for spacing
