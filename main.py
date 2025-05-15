@@ -346,7 +346,7 @@ def extract_info(transcription, meeting_title, date, mistral_api_key, previous_c
             model="mistral-small-latest",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=4000
+            max_tokens=8000
         )
 
         # Extract the content
