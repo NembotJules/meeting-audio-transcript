@@ -346,7 +346,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 10000  # Increased to avoid truncation of JSON
+            "max_tokens": 8192  # Increased to avoid truncation of JSON
         }
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
