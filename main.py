@@ -145,6 +145,53 @@ def answer_question_with_context(question, context, deepseek_api_key):
     except Exception as e:
         return f"Error: {e}"
 
+def clean_json_response(response):
+    """
+    Clean an API response to extract valid JSON content.
+    Returns the cleaned response as a string, or None if cleaning fails.
+    """
+    # Handle bytes input
+    if isinstance(response, bytes):
+        try:
+            response = response.decode('utf-8')
+        except UnicodeDecodeError as e:
+            st.error(f"Failed to decode response as UTF-8: {e}")
+            return None
+
+    # Ensure the response is a string
+    if not isinstance(response, str):
+        st.error(f"Response is not a string or bytes: {type(response)}")
+        return None
+
+    # Log the raw response for debugging
+    st.write(f"Raw API response before cleaning: {repr(response)}")
+
+    # Remove leading/trailing whitespace
+    response = response.strip()
+
+    # Handle empty response
+    if not response:
+        st.error("Response is empty after stripping whitespace.")
+        return None
+
+    # Remove Markdown code fences (e.g., ```json ... ``` or ``` ... ```)
+    response = response.removeprefix('```json').removesuffix('```').strip()
+    response = response.removeprefix('```').removesuffix('```').strip()
+
+    # Check if the response looks like JSON (starts with { or [)
+    if not (response.startswith("{") or response.startswith("[")):
+        # Try to extract JSON from a larger text (e.g., "Here is the JSON: {...}")
+        json_match = re.search(r'\{.*\}|\[.*\]', response, re.DOTALL)
+        if json_match:
+            response = json_match.group(0)
+        else:
+            st.error(f"Response does not contain valid JSON: {response}")
+            return None
+
+    # Log the cleaned response
+    st.write(f"Cleaned response: {repr(response)}")
+    return response
+
 def extract_info_fallback(transcription, meeting_title, date):
     """Fallback function to extract information using improved string parsing and regex."""
     extracted_data = {
@@ -346,7 +393,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 8192  # Increased to avoid truncation of JSON
+            "max_tokens": 4000
         }
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
@@ -363,19 +410,15 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         
         # Extract the content
         raw_response = full_response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        st.write(f"Raw Deepseek response content: {repr(raw_response)}")  # Use repr to show exact content
         
-        # Check if the response is empty or not JSON-like
-        if not raw_response:
-            st.error("Deepseek API returned an empty response. Falling back to basic extraction.")
-            return extract_info_fallback(transcription, meeting_title, date)
-        
-        if not (raw_response.startswith("{") or raw_response.startswith("[")):
-            st.error(f"Deepseek API response is not valid JSON: {raw_response}. Falling back to basic extraction.")
+        # Clean the response
+        cleaned_response = clean_json_response(raw_response)
+        if cleaned_response is None:
+            st.error("Failed to clean API response into valid JSON. Falling back to basic extraction.")
             return extract_info_fallback(transcription, meeting_title, date)
 
-        # Attempt to parse the response as JSON
-        extracted_data = json.loads(raw_response)
+        # Attempt to parse the cleaned response as JSON
+        extracted_data = json.loads(cleaned_response)
         
         # Check if the response contains an error key
         if "error" in extracted_data:
@@ -388,7 +431,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         return extracted_data
 
     except json.JSONDecodeError as e:
-        st.error(f"Error parsing JSON: {e}. Raw response: {repr(raw_response)}. Falling back to basic extraction.")
+        st.error(f"Error parsing JSON after cleaning: {e}. Cleaned response: {repr(cleaned_response)}. Falling back to basic extraction.")
         return extract_info_fallback(transcription, meeting_title, date)
     except Exception as e:
         st.error(f"Error extracting information: {e}. Falling back to basic extraction.")
