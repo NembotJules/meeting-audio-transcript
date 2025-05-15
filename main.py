@@ -17,6 +17,7 @@ import torchaudio
 import json
 import re
 import base64
+import streamlit.components.v1 as components
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
@@ -914,13 +915,58 @@ def main():
                         meeting_date
                     )
                     if docx_data:
+                        # Encode the binary data to Base64
+                        encoded_data = base64.b64encode(docx_data).decode('utf-8')
+                        file_name = f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx"
+                        mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        
+                        # JavaScript to auto-trigger the download
+                        js_code = f"""
+                        <script>
+                        (function() {{
+                            const data = "{encoded_data}";
+                            const fileName = "{file_name}";
+                            const mimeType = "{mime_type}";
+                            
+                            // Decode Base64 to binary
+                            const byteCharacters = atob(data);
+                            const byteNumbers = new Array(byteCharacters.length);
+                            for (let i = 0; i < byteCharacters.length; i++) {{
+                                byteNumbers[i] = byteCharacters.charCodeAt(i);
+                            }}
+                            const byteArray = new Uint8Array(byteNumbers);
+                            
+                            // Create a blob and URL
+                            const blob = new Blob([byteArray], {{ type: mimeType }});
+                            const url = window.URL.createObjectURL(blob);
+                            
+                            // Create a temporary link and trigger download
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = fileName;
+                            document.body.appendChild(link);
+                            link.click();
+                            
+                            // Clean up
+                            document.body.removeChild(link);
+                            window.URL.revokeObjectURL(url);
+                        }})();
+                        </script>
+                        """
+                        
+                        # Inject the JavaScript to trigger the download
+                        components.html(js_code, height=0)
+                        
+                        # Provide feedback to the user
+                        st.success(f"Téléchargement démarré pour {file_name}.")
+                        
+                        # Fallback: Provide a manual download button in case the auto-download fails
                         st.download_button(
-                            label="Téléchargement du Document en Cours...",
+                            label="Télécharger manuellement (si le téléchargement automatique a échoué)",
                             data=docx_data,
-                            file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            key="download-button",
-                            on_click=lambda: None
+                            file_name=file_name,
+                            mime=mime_type,
+                            key="manual-download-button"
                         )
 
 if __name__ == "__main__":
