@@ -113,10 +113,10 @@ def extract_context_from_report(file, mistral_api_key):
         st.error(f"Error processing file with Mistral OCR: {e}")
         return ""
 
-def answer_question_with_context(question, context, mistral_api_key):
-    """Answer a question based on the extracted context using Mistral API."""
-    if not context or not question or not mistral_api_key:
-        return "Please provide a question, context, and Mistral API key."
+def answer_question_with_context(question, context, deepseek_api_key):
+    """Answer a question based on the extracted context using Deepseek API."""
+    if not context or not question or not deepseek_api_key:
+        return "Please provide a question, context, and Deepseek API key."
     
     prompt = f"""
     As an assistant, answer the following question based on the provided context.
@@ -130,14 +130,18 @@ def answer_question_with_context(question, context, mistral_api_key):
     **Answer**:
     """
     try:
-        client = Mistral(api_key=mistral_api_key)
-        response = client.chat.complete(
-            model="mistral-small-latest",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=500
-        )
-        return response.choices[0].message.content.strip()
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {deepseek_api_key}"}
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 500
+        }
+        response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload)
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"].strip()
+        else:
+            return f"API Error: {response.status_code}"
     except Exception as e:
         return f"Error: {e}"
 
@@ -168,7 +172,7 @@ def extract_info_fallback(transcription, meeting_title, date):
     else:
         # Fallback to infer presence from names mentioned in the transcript
         names = re.findall(r"\b[A-Z][a-z]+(?: [A-Z][a-z]+)?\b", transcription)
-        # Filter out common words that might be mistaken as names (e.g., "Réunion", "Projet")
+        # Filter out common words that might be mistaken as names
         common_words = {"Réunion", "Projet", "Président", "Rapporteur", "Solde", "Compte", "Ordre", "Agenda"}
         names = [name for name in set(names) if name not in common_words]
         if names:
@@ -263,104 +267,111 @@ def extract_info_fallback(transcription, meeting_title, date):
 
     return extracted_data
 
-def extract_info(transcription, meeting_title, date, mistral_api_key, previous_context=""):
-    """Extract key information from the transcription using Mistral API with previous context."""
-    if not transcription or not mistral_api_key:
+def to_roman(num):
+    """Convert an integer to a Roman numeral."""
+    roman_numerals = {
+        1: "I", 2: "II", 3: "III", 4: "IV", 5: "V",
+        6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"
+    }
+    return roman_numerals.get(num, str(num))
+
+def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context=""):
+    """Extract key information from the transcription using Deepseek API with previous context."""
+    if not transcription or not deepseek_api_key:
         return extract_info_fallback(transcription, meeting_title, date)
 
     prompt = f"""
-    Vous êtes un assistant IA expert en rédaction automatique de comptes rendus de réunion pour une institution bancaire. Votre mission est d’analyser un transcript de réunion en français et de générer un rapport structuré sous forme de JSON avec des clés en anglais. Vous devez toujours retourner un JSON valide, même en cas d'échec.
+    Vous êtes un assistant IA chargé d'extraire des informations clés d'un transcript de réunion en français pour une institution bancaire. Votre tâche est de produire un JSON structuré avec des clés en anglais. Vous devez TOUJOURS retourner un JSON valide, même en cas d'échec.
 
-    **Contexte de la réunion précédente** :
+    **Contexte de la réunion suivante** :
     {previous_context if previous_context else "Aucun contexte disponible."}
 
     Utilisez ce contexte uniquement pour les résolutions et sanctions, et non pour la liste des présents/absents.
 
-    **Transcript de la réunion actuelle** :
+    **Transcript de la réunion** :
     {transcription}
 
     **Instructions** :
-    - Extraire les informations suivantes et les structurer dans un objet JSON avec les clés en anglais spécifiées.
+    - Extraire les informations suivantes et les structurer dans un objet JSON avec les clés en anglais.
     - Si une information est manquante, utilisez les valeurs par défaut indiquées.
-    - Assurez-vous que toutes les dates sont au format JJ/MM/AAAA (par exemple, "14/05/2025").
+    - Assurez-vous que toutes les dates sont au format JJ/MM/AAAA (par exemple, "15/05/2025").
     - Les clés du JSON doivent être en anglais, mais les valeurs doivent refléter le texte original (en français).
-    - Retournez toujours un JSON valide, même si vous ne pouvez pas extraire certaines informations. Si vous échouez complètement, retournez {{"error": "Impossible de traiter le transcript"}}.
+    - Retournez uniquement un JSON valide. Si vous échouez, retournez {{"error": "Impossible de traiter le transcript"}}.
+    - Ne produisez AUCUN texte en dehors du JSON, pas de commentaires ni d'explications.
 
     **Informations à extraire** :
 
-    1. **presence_list** : Liste des présents et absents sous forme de chaîne (par exemple, "Présents: Alice, Bob\nAbsents: Charlie").
-       - **Présents** : Identifiez les participants ayant pris la parole ou mentionnés comme présents (mots-clés : "Présents", "Présent"). Si implicite, déduisez à partir des interventions (ex. : "Alice a dit…" implique qu'Alice est présente). Seule la transcription actuelle doit être utilisée.
-       - **Absents** : Recherchez uniquement les mentions explicites dans le transcript (mots-clés : "Absents", "Absent"). Si aucune mention explicite, indiquez "Absents: Non spécifié".
-       - Si aucune information sur les présents n’est trouvée, indiquez : "Présents: Non spécifié\nAbsents: Non spécifié".
+    1. **presence_list** : Liste des présents et absents sous forme de chaîne (ex. "Présents: Alice, Bob\nAbsents: Charlie").
+       - **Présents** : Identifiez les participants mentionnés comme présents (mots-clés : "Présents", "Présent") ou ayant pris la parole (ex. "Alice a dit…").
+       - **Absents** : Recherchez les mentions explicites (mots-clés : "Absents", "Absent"). Sinon, indiquez "Absents: Non spécifié".
+       - Si aucune info, indiquez : "Présents: Non spécifié\nAbsents: Non spécifié".
 
-    2. **agenda_items** : Liste des points de l'ordre du jour sous forme de chaîne (par exemple, "I- Revue des minutes\nII- Résolutions").
-       - Recherchez des mots-clés comme "Ordre du jour" ou "Agenda".
-       - Si aucun "Ordre du jour" n’est mentionné, déduisez les points discutés à partir des sujets abordés (ex. : "On a discuté des résolutions").
-       - Si rien ne peut être déduit, utilisez : "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers".
+    2. **agenda_items** : Liste des points de l'ordre du jour sous forme de chaîne (ex. "I- Revue\nII- Résolutions").
+       - Recherchez "Ordre du jour" ou "Agenda".
+       - Sinon, déduisez à partir des sujets discutés.
+       - Par défaut : "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers".
 
-    3. **president** : Président de séance.
-       - Recherchez les mots-clés "Président", "Présidente", "Prési", ou des mentions comme "présidé par".
-       - Si non trouvé, indiquez : "Non spécifié".
+    3. **president** : Président de séance (mots-clés : "Président", "Présidente", "Prési").
+       - Par défaut : "Non spécifié".
 
-    4. **rapporteur** : Rapporteur de la réunion.
-       - Recherchez "Rapporteur", "Rapporteuse", ou des mentions comme "a rédigé".
-       - Si non trouvé, indiquez : "Non spécifié".
+    4. **rapporteur** : Rapporteur (mots-clés : "Rapporteur", "Rapporteuse").
+       - Par défaut : "Non spécifié".
 
-    5. **start_time** et **end_time** : Heure de début et de fin (format HHhMMmin, ex. "07h00min").
-       - Identifiez les horaires mentionnés (ex. : "La réunion a commencé à 10h00").
-       - Si non disponibles, utilisez "Non spécifié".
+    5. **start_time** et **end_time** : Heure de début et fin (format HHhMMmin, ex. "10h00min").
+       - Par défaut : "Non spécifié".
 
-    6. **balance_amount** : Solde du compte solidarité DRI.
-       - Recherchez "solde", "compte", "balance".
-       - Si non trouvé, indiquez : "Non spécifié".
+    6. **balance_amount** : Solde du compte (mots-clés : "solde", "compte", "balance").
+       - Par défaut : "Non spécifié".
 
     7. **balance_date** : Date du solde (format JJ/MM/AAAA).
-       - Recherchez une date associée au solde.
-       - Si non mentionnée, utilisez : {date}.
+       - Par défaut : {date}.
 
-    8. **resolutions_summary** : Tableau récapitulatif des résolutions (liste de dictionnaires).
-       - Clés : "date", "dossier", "resolution", "responsible", "deadline", "execution_date", "status", "report_count".
-       - "date", "deadline", "execution_date" au format JJ/MM/AAAA.
-       - "report_count" comme une chaîne (ex. "0").
-       - Recherchez "Résolution", "Décision".
-       - Utilisez le contexte pour identifier les résolutions non résolues mentionnées.
-       - Valeurs par défaut : "dossier": "Non spécifié", "responsible": "Non spécifié", "deadline": "Non spécifié", "execution_date": "", "status": "En cours", "report_count": "0".
+    8. **resolutions_summary** : Liste de dictionnaires pour les résolutions.
+       - Clés : "date" (JJ/MM/AAAA), "dossier", "resolution", "responsible", "deadline" (JJ/MM/AAAA), "execution_date" (JJ/MM/AAAA), "status", "report_count".
+       - Par défaut : "dossier": "Non spécifié", "responsible": "Non spécifié", "deadline": "Non spécifié", "execution_date": "", "status": "En cours", "report_count": "0".
 
-    9. **sanctions_summary** : Tableau récapitulatif des sanctions (liste de dictionnaires).
-       - Clés : "name", "reason", "amount", "date", "status".
-       - "date" au format JJ/MM/AAAA, "amount" comme une chaîne.
-       - Recherchez "Sanction", "Amende".
-       - Valeurs par défaut : "name": "Non spécifié", "reason": "Non spécifié", "amount": "0", "status": "Appliquée".
+    9. **sanctions_summary** : Liste de dictionnaires pour les sanctions.
+       - Clés : "name", "reason", "amount", "date" (JJ/MM/AAAA), "status".
+       - Par défaut : "name": "Non spécifié", "reason": "Non spécifié", "amount": "0", "status": "Appliquée".
 
     **Exemple de sortie** :
-    {{"presence_list": "Présents: Alice, Bob\nAbsents: Charlie", "agenda_items": "I- Revue des minutes\nII- Résolutions", "president": "Alice", "rapporteur": "Bob", "start_time": "10h00min", "end_time": "11h00min", "balance_amount": "827540", "balance_date": "14/05/2025", "resolutions_summary": [{{"date": "14/05/2025", "dossier": "Projet X", "resolution": "Finaliser le rapport", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "En cours", "report_count": "0"}}], "sanctions_summary": [{{"name": "Charlie", "reason": "Retard", "amount": "5000", "date": "14/05/2025", "status": "Appliquée"}}]}}
-
-    **Exemple d'erreur** :
-    {{"error": "Transcript vide ou illisible"}}
-
-    Retournez le résultat sous forme de JSON structuré.
+    {{"presence_list": "Présents: Alice, Bob\nAbsents: Charlie", "agenda_items": "I- Revue\nII- Résolutions", "president": "Alice", "rapporteur": "Bob", "start_time": "10h00min", "end_time": "11h00min", "balance_amount": "827540", "balance_date": "15/05/2025", "resolutions_summary": [{{"date": "15/05/2025", "dossier": "Projet X", "resolution": "Finaliser le rapport", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "En cours", "report_count": "0"}}], "sanctions_summary": [{{"name": "Charlie", "reason": "Retard", "amount": "5000", "date": "15/05/2025", "status": "Appliquée"}}]}}
     """
     try:
-        client = Mistral(api_key=mistral_api_key)
-        response = client.chat.complete(
-            model="mistral-small-latest",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=8000
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {deepseek_api_key}"
+        }
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 4000  # Increased to avoid truncation of JSON
+        }
+        response = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers=headers,
+            json=payload
         )
+        if response.status_code != 200:
+            st.error(f"Deepseek API error: Status {response.status_code}, Message: {response.text}. Falling back to basic extraction.")
+            return extract_info_fallback(transcription, meeting_title, date)
 
-        # Extract the content
-        raw_response = response.choices[0].message.content.strip()
-        st.write(f"Raw Mistral response content: {repr(raw_response)}")  # Log the raw response for debugging
+        # Log the full response for debugging
+        full_response = response.json()
+        st.write(f"Full Deepseek response: {json.dumps(full_response, indent=2)}")
         
-        # Check if the response is empty
+        # Extract the content
+        raw_response = full_response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        st.write(f"Raw Deepseek response content: {repr(raw_response)}")  # Use repr to show exact content
+        
+        # Check if the response is empty or not JSON-like
         if not raw_response:
-            st.error("Mistral API returned an empty response. Falling back to basic extraction.")
+            st.error("Deepseek API returned an empty response. Falling back to basic extraction.")
             return extract_info_fallback(transcription, meeting_title, date)
         
-        # Check if the response looks like JSON
         if not (raw_response.startswith("{") or raw_response.startswith("[")):
-            st.error(f"Mistral API response is not valid JSON: {raw_response}. Falling back to basic extraction.")
+            st.error(f"Deepseek API response is not valid JSON: {raw_response}. Falling back to basic extraction.")
             return extract_info_fallback(transcription, meeting_title, date)
 
         # Attempt to parse the response as JSON
@@ -368,7 +379,7 @@ def extract_info(transcription, meeting_title, date, mistral_api_key, previous_c
         
         # Check if the response contains an error key
         if "error" in extracted_data:
-            st.error(f"Mistral API error: {extracted_data['error']}. Falling back to basic extraction.")
+            st.error(f"Deepseek API error: {extracted_data['error']}. Falling back to basic extraction.")
             return extract_info_fallback(transcription, meeting_title, date)
         
         # Add meeting metadata
@@ -380,16 +391,8 @@ def extract_info(transcription, meeting_title, date, mistral_api_key, previous_c
         st.error(f"Error parsing JSON: {e}. Raw response: {repr(raw_response)}. Falling back to basic extraction.")
         return extract_info_fallback(transcription, meeting_title, date)
     except Exception as e:
-        st.error(f"Error extracting information with Mistral API: {e}. Falling back to basic extraction.")
+        st.error(f"Error extracting information: {e}. Falling back to basic extraction.")
         return extract_info_fallback(transcription, meeting_title, date)
-
-def to_roman(num):
-    """Convert an integer to a Roman numeral."""
-    roman_numerals = {
-        1: "I", 2: "II", 3: "III", 4: "IV", 5: "V",
-        6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"
-    }
-    return roman_numerals.get(num, str(num))
 
 def set_cell_background(cell, rgb_color):
     """Set the background color of a table cell using RGB values."""
@@ -763,6 +766,7 @@ def main():
     # Sidebar for API keys and previous report
     st.sidebar.header("Configuration")
     st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
+    st.session_state.deepseek_api_key = st.sidebar.text_input("Deepseek API Key", type="password")
     
     st.sidebar.header("Contexte Précédent")
     previous_report = st.sidebar.file_uploader("Télécharger le rapport précédent (optionnel)", type=["pdf", "png", "jpg", "jpeg"])
@@ -801,7 +805,7 @@ def main():
                 answer = answer_question_with_context(
                     question, 
                     st.session_state.previous_context, 
-                    st.session_state.mistral_api_key
+                    st.session_state.deepseek_api_key
                 )
             st.sidebar.write("**Réponse :**")
             st.sidebar.write(answer)
@@ -835,7 +839,7 @@ def main():
                                     st.session_state.transcription,
                                     meeting_title,
                                     meeting_date.strftime("%d/%m/%Y"),
-                                    st.session_state.mistral_api_key,
+                                    st.session_state.deepseek_api_key,
                                     st.session_state.get("previous_context", "")
                                 )
                                 if extracted_info:
@@ -851,7 +855,7 @@ def main():
                         st.session_state.transcription,
                         meeting_title,
                         meeting_date.strftime("%d/%m/%Y"),
-                        st.session_state.mistral_api_key,
+                        st.session_state.deepseek_api_key,
                         st.session_state.get("previous_context", "")
                     )
                     if extracted_info:
