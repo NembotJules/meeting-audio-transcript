@@ -2,7 +2,7 @@ import streamlit as st
 from mistralai import Mistral
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from transformers import pipeline
 from docx import Document
@@ -17,7 +17,13 @@ import torchaudio
 import json
 import re
 import base64
-import streamlit.components.v1 as components
+
+# Try to import tiktoken for accurate token counting; fall back to simple method if unavailable
+try:
+    import tiktoken
+    TOKENIZER_AVAILABLE = True
+except ImportError:
+    TOKENIZER_AVAILABLE = False
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
@@ -146,6 +152,16 @@ def answer_question_with_context(question, context, deepseek_api_key):
     except Exception as e:
         return f"Error: {e}"
 
+def count_tokens(text):
+    """Count the number of tokens in a text string."""
+    if TOKENIZER_AVAILABLE:
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+    else:
+        # Fallback: Simple token count based on whitespace and punctuation
+        tokens = re.findall(r'\b\w+\b|[.,!?;]', text)
+        return len(tokens)
+
 def clean_json_response(response):
     """
     Clean an API response to extract valid JSON content.
@@ -240,13 +256,42 @@ def extract_info_fallback(transcription, meeting_title, date):
                 numbered_items.append(item)
             extracted_data["agenda_items"] = "\n".join(numbered_items)
 
-    # Extract start and end times
-    time_pattern = r"\b(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))\b"
-    times = re.findall(time_pattern, transcription, re.IGNORECASE)
-    if times:
-        extracted_data["start_time"] = times[0]
-        if len(times) > 1:
-            extracted_data["end_time"] = times[-1]
+    # Extract start time
+    start_time_pattern = r"(?:début|commence|commencée)[\s\w]*?(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))"
+    start_time_match = re.search(start_time_pattern, transcription, re.IGNORECASE)
+    if start_time_match:
+        extracted_data["start_time"] = start_time_match.group(1).replace("h:", "h").replace("min", "min")
+
+    # Extract duration and calculate end time if end time is not specified
+    duration_pattern = r"(?:durée|dure|duré|lasted)[\s\w]*?(\d{1,2}h(?:\d{1,2}min)?(?:\d{1,2}s)?)"
+    duration_match = re.search(duration_pattern, transcription, re.IGNORECASE)
+    end_time_pattern = r"(?:fin|terminée|terminé|ended)[\s\w]*?(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))"
+    end_time_match = re.search(end_time_pattern, transcription, re.IGNORECASE)
+
+    if end_time_match:
+        extracted_data["end_time"] = end_time_match.group(1).replace("h:", "h").replace("min", "min")
+    elif start_time_match and duration_match:
+        # Parse start time
+        start_time_str = start_time_match.group(1).replace("h", ":").replace("min", "")
+        try:
+            start_time = datetime.strptime(start_time_str, "%H:%M")
+        except ValueError:
+            start_time = datetime.strptime(start_time_str, "%H")
+
+        # Parse duration
+        duration_str = duration_match.group(1)
+        hours = minutes = seconds = 0
+        if "h" in duration_str:
+            hours = int(re.search(r"(\d+)h", duration_str).group(1))
+        if "min" in duration_str:
+            minutes = int(re.search(r"(\d+)min", duration_str).group(1))
+        if "s" in duration_str:
+            seconds = int(re.search(r"(\d+)s", duration_str).group(1))
+
+        # Calculate end time
+        duration_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+        end_time = start_time + duration_delta
+        extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
 
     # Extract rapporteur and president
     rapporteur_match = re.search(r"(Rapporteur|Rapporteuse)[:\s]*([A-Z][a-z]+)", transcription, re.IGNORECASE)
@@ -418,6 +463,14 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             st.error("Failed to clean API response into valid JSON. Falling back to basic extraction.")
             return extract_info_fallback(transcription, meeting_title, date)
 
+        # Count tokens in the API response and the cleaned response
+        api_tokens = full_response.get("usage", {}).get("completion_tokens", 0)
+        displayed_tokens = count_tokens(cleaned_response)
+        token_difference = api_tokens - displayed_tokens
+        st.write(f"Token Count - API Response: {api_tokens}, Displayed Response: {displayed_tokens}, Difference: {token_difference}")
+        if token_difference > 0:
+            st.warning("The displayed response has fewer tokens than the API response, indicating possible truncation during cleaning.")
+
         # Attempt to parse the cleaned response as JSON
         extracted_data = json.loads(cleaned_response)
         
@@ -425,6 +478,33 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         if "error" in extracted_data:
             st.error(f"Deepseek API error: {extracted_data['error']}. Falling back to basic extraction.")
             return extract_info_fallback(transcription, meeting_title, date)
+
+        # If end_time is "Non spécifié" but start_time and duration are available, calculate end_time
+        if extracted_data.get("end_time") == "Non spécifié":
+            start_time_str = extracted_data.get("start_time", "Non spécifié")
+            duration_match = re.search(r"(?:durée|dure|duré|lasted)[\s\w]*?(\d{1,2}h(?:\d{1,2}min)?(?:\d{1,2}s)?)", transcription, re.IGNORECASE)
+            if start_time_str != "Non spécifié" and duration_match:
+                # Parse start time
+                start_time_cleaned = start_time_str.replace("h", ":").replace("min", "")
+                try:
+                    start_time = datetime.strptime(start_time_cleaned, "%H:%M")
+                except ValueError:
+                    start_time = datetime.strptime(start_time_cleaned, "%H")
+
+                # Parse duration
+                duration_str = duration_match.group(1)
+                hours = minutes = seconds = 0
+                if "h" in duration_str:
+                    hours = int(re.search(r"(\d+)h", duration_str).group(1))
+                if "min" in duration_str:
+                    minutes = int(re.search(r"(\d+)min", duration_str).group(1))
+                if "s" in duration_str:
+                    seconds = int(re.search(r"(\d+)s", duration_str).group(1))
+
+                # Calculate end time
+                duration_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+                end_time = start_time + duration_delta
+                extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
         
         # Add meeting metadata
         extracted_data["date"] = date
@@ -655,7 +735,8 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 absent_text = absent_attendees[i] if i < len(absent_attendees) else ""
                 attendance_data.append([present_text, absent_text])
             
-            attendance_column_widths = [3.25, 3.25]
+            # Increased column widths and table width
+            attendance_column_widths = [4.0, 4.0]  # Increased from [3.25, 3.25]
             add_styled_table(
                 doc,
                 rows=max_rows + 1,
@@ -666,7 +747,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 header_text_color=(255, 255, 255),
                 alt_row_bg_color=(192, 192, 192),
                 column_widths=attendance_column_widths,
-                table_width=6.5
+                table_width=8.0  # Increased from 6.5
             )
         else:
             add_styled_paragraph(
@@ -675,6 +756,9 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 font_name="Century",
                 font_size=12
             )
+
+        # Add page break before "Ordre du jour"
+        doc.add_page_break()
 
         # Add agenda items
         add_styled_paragraph(
@@ -727,7 +811,8 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 str(resolution.get("report_count", ""))
             ]
             resolutions_data.append(row_data)
-        resolutions_column_widths = [0.9, 1.2, 1.8, 0.8, 1.2, 0.9, 0.8, 0.9]
+        # Increased column widths and table width
+        resolutions_column_widths = [1.2, 1.5, 2.2, 1.0, 1.5, 1.2, 1.0, 1.2]  # Increased proportionally from [0.9, 1.2, 1.8, 0.8, 1.2, 0.9, 0.8, 0.9]
         add_styled_table(
             doc,
             rows=len(resolutions) + 1,
@@ -738,7 +823,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             header_text_color=(255, 255, 255),
             alt_row_bg_color=(192, 192, 192),
             column_widths=resolutions_column_widths,
-            table_width=7.5
+            table_width=9.8  # Increased from 7.5
         )
 
         # Add sanctions summary
@@ -770,7 +855,8 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 sanction.get("status", "")
             ]
             sanctions_data.append(row_data)
-        sanctions_column_widths = [1.5, 1.8, 1.4, 1.2, 1.6]
+        # Increased column widths and table width
+        sanctions_column_widths = [1.8, 2.2, 1.8, 1.5, 2.0]  # Increased proportionally from [1.5, 1.8, 1.4, 1.2, 1.6]
         add_styled_table(
             doc,
             rows=len(sanctions) + 1,
@@ -781,8 +867,11 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             header_text_color=(255, 255, 255),
             alt_row_bg_color=(192, 192, 192),
             column_widths=sanctions_column_widths,
-            table_width=7.5
+            table_width=9.3  # Increased from 7.5
         )
+
+        # Add a blank paragraph for spacing
+        doc.add_paragraph("")
 
         # Add balance information
         add_styled_paragraph(
@@ -915,58 +1004,12 @@ def main():
                         meeting_date
                     )
                     if docx_data:
-                        # Encode the binary data to Base64
-                        encoded_data = base64.b64encode(docx_data).decode('utf-8')
-                        file_name = f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx"
-                        mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        
-                        # JavaScript to auto-trigger the download
-                        js_code = f"""
-                        <script>
-                        (function() {{
-                            const data = "{encoded_data}";
-                            const fileName = "{file_name}";
-                            const mimeType = "{mime_type}";
-                            
-                            // Decode Base64 to binary
-                            const byteCharacters = atob(data);
-                            const byteNumbers = new Array(byteCharacters.length);
-                            for (let i = 0; i < byteCharacters.length; i++) {{
-                                byteNumbers[i] = byteCharacters.charCodeAt(i);
-                            }}
-                            const byteArray = new Uint8Array(byteNumbers);
-                            
-                            // Create a blob and URL
-                            const blob = new Blob([byteArray], {{ type: mimeType }});
-                            const url = window.URL.createObjectURL(blob);
-                            
-                            // Create a temporary link and trigger download
-                            const link = document.createElement('a');
-                            link.href = url;
-                            link.download = fileName;
-                            document.body.appendChild(link);
-                            link.click();
-                            
-                            // Clean up
-                            document.body.removeChild(link);
-                            window.URL.revokeObjectURL(url);
-                        }})();
-                        </script>
-                        """
-                        
-                        # Inject the JavaScript to trigger the download
-                        components.html(js_code, height=0)
-                        
-                        # Provide feedback to the user
-                        st.success(f"Téléchargement démarré pour {file_name}.")
-                        
-                        # Fallback: Provide a manual download button in case the auto-download fails
                         st.download_button(
-                            label="Télécharger manuellement (si le téléchargement automatique a échoué)",
+                            label="Télécharger le Document",
                             data=docx_data,
-                            file_name=file_name,
-                            mime=mime_type,
-                            key="manual-download-button"
+                            file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key="download-button"
                         )
 
 if __name__ == "__main__":
