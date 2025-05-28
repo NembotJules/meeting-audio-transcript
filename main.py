@@ -152,7 +152,9 @@ def answer_question_with_context(question, context, deepseek_api_key):
                 sanctions = parse_sanctions_from_text(answer)
                 if sanctions:
                     st.session_state.context_sanctions = sanctions
-                    st.write(f"Stored sanctions from answer: {sanctions}")
+                    st.sidebar.success(f"Sanctions stored in session state!")
+                else:
+                    st.sidebar.warning("No sanctions found in context")
             return answer
         else:
             return f"API Error: {response.status_code}"
@@ -222,7 +224,7 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         "agenda_items": "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers",
         "activities_review": [],
         "resolutions_summary": [],
-        "sanctions_summary": [],
+        "sanctions_summary": [],  # Start with empty list
         "start_time": "Non spécifié",
         "end_time": "Non spécifié",
         "rapporteur": "Non spécifié",
@@ -345,7 +347,7 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
                 "report_count": "0"
             })
 
-    # Extract sanctions
+    # Extract sanctions - PRIORITY: Current meeting > Context > Default
     sanction_section = re.search(r"(Sanction|Amende)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
     if sanction_section:
         sanction_text = sanction_section.group(2).strip()
@@ -364,13 +366,17 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
                 "date": date,
                 "status": "Appliquée"
             })
-    elif "context_sanctions" in st.session_state:
+    
+    # Use context sanctions if none found in current meeting
+    if not extracted_data["sanctions_summary"] and "context_sanctions" in st.session_state:
         sanctions = st.session_state.context_sanctions
         for sanction in sanctions:
-            sanction["date"] = date
+            sanction["date"] = date  # Update date to current meeting
         extracted_data["sanctions_summary"] = sanctions
-        st.write(f"Using stored context_sanctions with updated date: {sanctions}")
-    else:
+        st.write(f"Using stored context_sanctions: {sanctions}")
+    
+    # Default if no sanctions found anywhere
+    if not extracted_data["sanctions_summary"]:
         extracted_data["sanctions_summary"] = [{
             "name": "Aucune",
             "reason": "Aucune sanction mentionnée",
@@ -489,9 +495,6 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         if "error" in extracted_data:
             st.error(f"API error: {extracted_data['error']}. Falling back.")
             return extract_info_fallback(full_transcription, meeting_title, date, previous_context)
-
-        # Log extracted sanctions
-        st.write(f"Extracted sanctions_summary: {extracted_data.get('sanctions_summary', 'None')}")
 
         # Use stored sanctions if none found and context_sanctions exists
         if not extracted_data.get("sanctions_summary") and "context_sanctions" in st.session_state:
