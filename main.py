@@ -125,27 +125,17 @@ def answer_question_with_context(question, context, deepseek_api_key):
     if not context or not question or not deepseek_api_key:
         return "Please provide a question, context, and Deepseek API key."
     
-    if "tableau récapitulatif des sanctions" in question.lower():
-        prompt = f"""
-        Extract the 'RÉCAPITULATIF DES SANCTIONS' table from the context and return it as a JSON list of objects with keys 'name', 'reason', 'amount', 'date', 'status'.
+    prompt = f"""
+    As an assistant, answer the following question based on the provided context.
 
-        **Context**:
-        {context}
+    **Context**:
+    {context}
 
-        **JSON**:
-        """
-    else:
-        prompt = f"""
-        As an assistant, answer the following question based on the provided context.
+    **Question**:
+    {question}
 
-        **Context**:
-        {context}
-
-        **Question**:
-        {question}
-
-        **Answer**:
-        """
+    **Answer**:
+    """
     
     try:
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {deepseek_api_key}"}
@@ -157,23 +147,38 @@ def answer_question_with_context(question, context, deepseek_api_key):
         }
         response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload)
         if response.status_code == 200:
-            raw_response = response.json()["choices"][0]["message"]["content"].strip()
+            answer = response.json()["choices"][0]["message"]["content"].strip()
             if "tableau récapitulatif des sanctions" in question.lower():
-                cleaned_response = clean_json_response(raw_response)
-                if cleaned_response:
-                    try:
-                        sanctions = json.loads(cleaned_response)
-                        if isinstance(sanctions, list):
-                            st.session_state.context_sanctions = sanctions
-                            st.write(f"Stored sanctions in session state: {sanctions}")
-                            return json.dumps(sanctions, indent=2)
-                    except json.JSONDecodeError:
-                        st.write("Failed to parse sanctions as JSON, returning raw response")
-            return raw_response
+                sanctions = parse_sanctions_from_text(answer)
+                if sanctions:
+                    st.session_state.context_sanctions = sanctions
+                    st.write(f"Stored sanctions from answer: {sanctions}")
+            return answer
         else:
             return f"API Error: {response.status_code}"
     except Exception as e:
         return f"Error: {e}"
+
+def parse_sanctions_from_text(text):
+    """Parse sanctions table from text into a list of dictionaries."""
+    sanctions = []
+    lines = text.split("\n")
+    header_found = False
+    for line in lines:
+        if "NOM" in line and "RAISON" in line and "MONTANT" in line:
+            header_found = True
+            continue
+        if header_found and line.strip():
+            parts = [part.strip() for part in line.split("|")]
+            if len(parts) >= 5:
+                sanctions.append({
+                    "name": parts[0],
+                    "reason": parts[1],
+                    "amount": parts[2].replace(" FCFA", "").replace("FCFA", ""),
+                    "date": parts[3],
+                    "status": parts[4]
+                })
+    return sanctions if sanctions else None
 
 def count_tokens(text):
     """Count the number of tokens in a text string."""
@@ -260,10 +265,9 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
     if start_time_match:
         extracted_data["start_time"] = start_time_match.group(1).replace("h:", "h").replace("min", "min")
 
-    # Extract duration and calculate end time if end time is not specified
+    # Extract duration and calculate end time
     duration_match = re.search(r"(?:durée|dure|duré|lasted)[\s\w]*?(\d{1,2}h(?:\d{1,2}min)?(?:\d{1,2}s)?)", transcription, re.IGNORECASE)
     end_time_match = re.search(r"(?:fin|terminée|terminé|ended)[\s\w]*?(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))", transcription, re.IGNORECASE)
-
     if end_time_match:
         extracted_data["end_time"] = end_time_match.group(1).replace("h:", "h").replace("min", "min")
     elif start_time_match and duration_match:
@@ -272,12 +276,10 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             start_time = datetime.strptime(start_time_str, "%H:%M")
         except ValueError:
             start_time = datetime.strptime(start_time_str, "%H")
-
         duration_str = duration_match.group(1)
         hours = int(re.search(r"(\d+)h", duration_str).group(1)) if "h" in duration_str else 0
         minutes = int(re.search(r"(\d+)min", duration_str).group(1)) if "min" in duration_str else 0
         seconds = int(re.search(r"(\d+)s", duration_str).group(1)) if "s" in duration_str else 0
-
         duration_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
         end_time = start_time + duration_delta
         extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
@@ -290,56 +292,49 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
     if president_match:
         extracted_data["president"] = president_match.group(2)
 
-    # Extract balance amount
+    # Extract balance
     balance_match = re.search(r"(solde|compte|balance)[\s\w]*?(\d+)", transcription, re.IGNORECASE)
     if balance_match:
         extracted_data["balance_amount"] = balance_match.group(2)
-
-    # Extract balance date
     balance_date_match = re.search(r"(solde|compte|balance)[\s\w]*?(\d{2}/\d{2}/\d{4})", transcription, re.IGNORECASE)
     if balance_date_match:
         extracted_data["balance_date"] = balance_date_match.group(2)
 
-    # Extract activities review (Revue des activités)
+    # Extract activities review
     activities_section = re.search(r"(Revue des activités|Activités de la semaine)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
     if activities_section:
         activities_text = activities_section.group(2).strip()
         activities_lines = [line.strip() for line in activities_text.split("\n") if line.strip()]
-        activities = []
         for line in activities_lines:
             actor_match = re.search(r"^[A-Z][a-z]+|^([A-Z][a-z]+(?: [A-Z][a-z]+)?)[\s,]", line)
             dossier_match = re.search(r"(?:dossier|sur le dossier) ([A-Za-z0-9\s]+)", line, re.IGNORECASE)
             activities_match = re.search(r"(?:activités|menées) ([A-Za-z\s,]+)", line, re.IGNORECASE)
             results_match = re.search(r"(?:résultat|obtenu) ([A-Za-z\s,]+)", line, re.IGNORECASE)
             perspectives_match = re.search(r"(?:perspectives|prévoit de) ([A-Za-z\s,]+)", line, re.IGNORECASE)
-
             actor = actor_match.group(1) if actor_match else "Non spécifié"
             dossier = dossier_match.group(1).strip() if dossier_match else "Non spécifié"
             activities_desc = activities_match.group(1).strip() if activities_match else "Non spécifié"
             results = results_match.group(1).strip() if results_match else "Non spécifié"
             perspectives = perspectives_match.group(1).strip() if perspectives_match else "Non spécifié"
-
-            activities.append({
+            extracted_data["activities_review"].append({
                 "actor": actor,
                 "dossier": dossier,
                 "activities": activities_desc,
                 "results": results,
                 "perspectives": perspectives
             })
-        extracted_data["activities_review"] = activities
 
-    # Extract resolutions (improved)
+    # Extract resolutions
     resolution_section = re.search(r"(Résolution|Resolutions)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
     if resolution_section:
         resolution_text = resolution_section.group(2).strip()
         resolution_lines = [line.strip() for line in resolution_text.split("\n") if line.strip()]
-        resolutions = []
         for res in resolution_lines:
             responsible_match = re.search(r"(?:par|responsable|attribué à) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)", res, re.IGNORECASE)
             deadline_match = re.search(r"(?:d'ici|avant le) (\d{2}/\d{2}/\d{4})", res, re.IGNORECASE)
             responsible = responsible_match.group(1) if responsible_match else "Non spécifié"
             deadline = deadline_match.group(1) if deadline_match else "Non spécifié"
-            resolutions.append({
+            extracted_data["resolutions_summary"].append({
                 "date": date,
                 "dossier": "Non spécifié",
                 "resolution": res,
@@ -349,14 +344,12 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
                 "status": "En cours",
                 "report_count": "0"
             })
-        extracted_data["resolutions_summary"] = resolutions
 
-    # Extract sanctions (improved)
+    # Extract sanctions
     sanction_section = re.search(r"(Sanction|Amende)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
     if sanction_section:
         sanction_text = sanction_section.group(2).strip()
         sanction_lines = [line.strip() for line in sanction_text.split("\n") if line.strip()]
-        sanctions = []
         for sanc in sanction_lines:
             name_match = re.search(r"^[A-Z][a-z]+|^([A-Z][a-z]+(?: [A-Z][a-z]+)?)[\s,]", sanc)
             amount_match = re.search(r"(\d+)\s*(?:FCFA|XAF)?", sanc)
@@ -364,31 +357,27 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             name = name_match.group(1) if name_match else "Non spécifié"
             amount = amount_match.group(1) if amount_match else "0"
             reason = reason_match.group(1).strip() if reason_match else sanc
-            sanctions.append({
+            extracted_data["sanctions_summary"].append({
                 "name": name,
                 "reason": reason,
                 "amount": amount,
                 "date": date,
                 "status": "Appliquée"
             })
+    elif "context_sanctions" in st.session_state:
+        sanctions = st.session_state.context_sanctions
+        for sanction in sanctions:
+            sanction["date"] = date
         extracted_data["sanctions_summary"] = sanctions
-        st.write(f"Fallback: Sanctions extracted from transcript: {sanctions}")
+        st.write(f"Using stored context_sanctions with updated date: {sanctions}")
     else:
-        if "context_sanctions" in st.session_state:
-            sanctions = st.session_state.context_sanctions
-            for sanction in sanctions:
-                sanction["date"] = date
-            extracted_data["sanctions_summary"] = sanctions
-            st.write(f"Fallback: Using stored context_sanctions with updated date: {sanctions}")
-        else:
-            extracted_data["sanctions_summary"] = [{
-                "name": "Aucune",
-                "reason": "Aucune sanction mentionnée",
-                "amount": "0",
-                "date": date,
-                "status": "Non appliquée"
-            }]
-            st.write("Fallback: No sanctions found, using default")
+        extracted_data["sanctions_summary"] = [{
+            "name": "Aucune",
+            "reason": "Aucune sanction mentionnée",
+            "amount": "0",
+            "date": date,
+            "status": "Non appliquée"
+        }]
 
     return extracted_data
 
@@ -405,14 +394,14 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     if not transcription or not deepseek_api_key:
         return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
+    # Append previous context to transcription
+    full_transcription = f"{transcription}\n\n**Contexte Précédent**:\n{previous_context}" if previous_context else transcription
+
     prompt = f"""
     Vous êtes un assistant IA chargé d'extraire des informations clés d'un transcript de réunion en français pour une institution bancaire. Votre tâche est de produire un JSON structuré avec des clés en anglais. Vous devez TOUJOURS retourner un JSON valide, même en cas d'échec.
 
-    **Contexte de la réunion précédente** :
-    {previous_context if previous_context else "Aucun contexte disponible."}
-
-    **Transcript de la réunion** :
-    {transcription}
+    **Transcript de la réunion (incluant le contexte précédent)** :
+    {full_transcription}
 
     **Instructions** :
     - Extraire les informations suivantes et les structurer dans un objet JSON avec les clés en anglais.
@@ -459,14 +448,16 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     9. **resolutions_summary** : Liste de dictionnaires pour les résolutions.
        - Clés : "date" (JJ/MM/AAAA), "dossier", "resolution", "responsible", "deadline" (JJ/MM/AAAA), "execution_date" (JJ/MM/AAAA), "status", "report_count".
        - Par défaut : "dossier": "Non spécifié", "responsible": "Non spécifié", "deadline": "Non spécifié", "execution_date": "", "status": "En cours", "report_count": "0".
-       - Recherchez les mentions sous "Résolution" ou "Resolutions" dans le transcript.
+       - Recherchez les mentions sous "Résolution" ou "Resolutions".
 
     10. **sanctions_summary** : Liste de dictionnaires pour les sanctions.
         - Clés : "name", "reason", "amount", "date" (JJ/MM/AAAA), "status".
         - Par défaut : "name": "Aucune", "reason": "Aucune sanction mentionnée", "amount": "0", "status": "Non appliquée".
         - Recherchez les mentions sous "Sanction" ou "Amende" dans le transcript.
-        - Si aucune sanction dans le transcript, extrayez les sanctions du contexte sous "RÉCAPITULATIF DES SANCTIONS".
-          - Mappez les colonnes : "name" (NOM), "reason" (RAISON), "amount" (MONTANT, sans "FCFA"), "date" ({date}), "status" (STATUT).
+        - Si aucune sanction n'est trouvée dans la partie principale du transcript, extrayez les sanctions de la section "**Contexte Précédent**" sous "RÉCAPITULATIF DES SANCTIONS".
+          - Les sanctions dans le contexte sont sous forme de tableau : NOM | RAISON | MONTANT (FCFA) | DATE | STATUT.
+          - Mappez : "name" (NOM), "reason" (RAISON), "amount" (MONTANT, sans "FCFA"), "date" (utilisez {date}), "status" (STATUT).
+          - Ignorez l'en-tête du tableau et extrayez les lignes de données.
     """
     try:
         headers = {
@@ -486,21 +477,21 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         )
         if response.status_code != 200:
             st.error(f"Deepseek API error: Status {response.status_code}. Falling back.")
-            return extract_info_fallback(transcription, meeting_title, date, previous_context)
+            return extract_info_fallback(full_transcription, meeting_title, date, previous_context)
 
         raw_response = response.json()["choices"][0]["message"]["content"].strip()
         cleaned_response = clean_json_response(raw_response)
-        if not cleaned_response:
+        if not  cleaned_response:
             st.error("Failed to clean JSON response. Falling back.")
-            return extract_info_fallback(transcription, meeting_title, date, previous_context)
+            return extract_info_fallback(full_transcription, meeting_title, date, previous_context)
 
         extracted_data = json.loads(cleaned_response)
         if "error" in extracted_data:
             st.error(f"API error: {extracted_data['error']}. Falling back.")
-            return extract_info_fallback(transcription, meeting_title, date, previous_context)
+            return extract_info_fallback(full_transcription, meeting_title, date, previous_context)
 
         # Log extracted sanctions
-        st.write(f"API extracted sanctions_summary: {extracted_data.get('sanctions_summary', 'None')}")
+        st.write(f"Extracted sanctions_summary: {extracted_data.get('sanctions_summary', 'None')}")
 
         # Use stored sanctions if none found and context_sanctions exists
         if not extracted_data.get("sanctions_summary") and "context_sanctions" in st.session_state:
@@ -517,7 +508,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
 
     except Exception as e:
         st.error(f"Error extracting info: {e}. Falling back.")
-        return extract_info_fallback(transcription, meeting_title, date, previous_context)
+        return extract_info_fallback(full_transcription, meeting_title, date, previous_context)
 
 def set_cell_background(cell, rgb_color):
     """Set the background color of a table cell."""
@@ -626,7 +617,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
     try:
         doc = Document()
 
-        # Extract presence list
+        # Extract presence list and split into present and absent attendees
         presence_list = extracted_info.get("presence_list", "Présents: Non spécifié\nAbsents: Non spécifié")
         present_attendees = []
         absent_attendees = []
@@ -652,7 +643,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         agenda_list = extracted_info.get("agenda_items", "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers").split("\n")
         agenda_list = [item.strip() for item in agenda_list if item.strip()]
 
-        # Add header
+        # Add header box
         add_text_in_box(doc, "Direction Recherches et Investissements", bg_color=(192, 192, 192), font_size=16)
         add_styled_paragraph(doc, "COMPTE RENDU DE RÉUNION", bold=True, color=RGBColor(192, 0, 0), alignment=WD_ALIGN_PARAGRAPH.CENTER)
         add_styled_paragraph(doc, extracted_info.get("date", ""), bold=True, color=RGBColor(192, 0, 0), alignment=WD_ALIGN_PARAGRAPH.CENTER)
@@ -666,11 +657,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         add_styled_paragraph(doc, "◆ LISTE DE PRÉSENCE", bold=True)
         if present_attendees or absent_attendees:
             max_rows = max(len(present_attendees), len(absent_attendees)) or 1
-            attendance_data = []
-            for i in range(max_rows):
-                present_text = present_attendees[i] if i < len(present_attendees) else ""
-                absent_text = absent_attendees[i] if i < len(absent_attendees) else ""
-                attendance_data.append([present_text, absent_text])
+            attendance_data = [[present_attendees[i] if i < len(present_attendees) else "", absent_attendees[i] if i < len(absent_attendees) else ""] for i in range(max_rows)]
             add_styled_table(doc, max_rows + 1, 2, ["PRÉSENTS", "ABSENTS"], attendance_data, column_widths=[4.5, 4.5], table_width=9.0)
         else:
             add_styled_paragraph(doc, "Aucune présence spécifiée.")
@@ -698,6 +685,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
 
         # Add sanctions
         sanctions = extracted_info.get("sanctions_summary", [{"name": "Aucune", "reason": "Aucune sanction mentionnée", "amount": "0", "date": extracted_info.get("date", ""), "status": "Non appliquée"}])
+        st.write(f"Sanctions for document: {sanctions}")
         add_styled_paragraph(doc, "RÉCAPITULATIF DES SANCTIONS", bold=True, color=RGBColor(192, 0, 0))
         sanctions_data = [[s.get("name", ""), s.get("reason", ""), s.get("amount", ""), s.get("date", ""), s.get("status", "")] for s in sanctions]
         add_styled_table(doc, len(sanctions) + 1, 5, ["NOM", "RAISON", "MONTANT (FCFA)", "DATE", "STATUT"], sanctions_data, column_widths=[2.0, 2.5, 2.0, 1.8, 2.2], table_width=10.5)
