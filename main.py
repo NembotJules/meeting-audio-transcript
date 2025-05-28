@@ -387,12 +387,14 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
                 "status": "Appliquée"
             })
         extracted_data["sanctions_summary"] = sanctions
+        st.write(f"Sanctions extracted from transcript (fallback): {sanctions}")
     else:
         # If no sanctions found in transcript, extract from previous context
         if previous_context and previous_context != "Aucun contexte disponible.":
+            st.write(f"Previous context for sanctions extraction: {previous_context}")
             sanctions = []
             # Look for "RÉCAPITULATIF DES SANCTIONS" section in the context
-            sanction_section = re.search(r"RÉCAPITULATIF DES SANCTIONS([\s\S]*?)(?=\n[A-Z]+:|\Z)", previous_context, re.IGNORECASE)
+            sanction_section = re.search(r"RÉCAPITULATIF DES SANCTIONS([\s\S]*?)(?=\n[A-Z][A-Z\s]+:|\Z)", previous_context, re.IGNORECASE)
             if sanction_section:
                 sanction_text = sanction_section.group(1).strip()
                 # Split into lines, assuming each line after the header is a sanction entry
@@ -402,13 +404,13 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
                     sanction_lines = sanction_lines[1:]  # Skip header
                 
                 for line in sanction_lines:
-                    # Split the line into columns based on typical separators (e.g., "|", spaces)
-                    parts = [part.strip() for part in re.split(r'\s*\|\s*|\s{2,}', line)]
+                    # Split the line into columns based on typical separators (e.g., "|", multiple spaces, tabs)
+                    parts = [part.strip() for part in re.split(r'\s*\|\s*|\t+|\s{2,}', line) if part.strip()]
                     if len(parts) >= 5:
                         sanctions.append({
                             "name": parts[0] if parts[0] else "Non spécifié",
                             "reason": parts[1] if parts[1] else "Non spécifié",
-                            "amount": parts[2].replace(" FCFA", "") if parts[2] else "0",
+                            "amount": parts[2].replace(" FCFA", "").replace("FCFA", "") if parts[2] else "0",
                             "date": date,  # Use the current meeting date
                             "status": parts[4] if parts[4] else "Appliquée"
                         })
@@ -422,6 +424,17 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
                     "date": date,
                     "status": "Non appliquée"
                 }]
+            extracted_data["sanctions_summary"] = sanctions
+            st.write(f"Sanctions extracted from context (fallback): {sanctions}")
+        else:
+            st.write("No previous context available for sanctions extraction.")
+            sanctions = [{
+                "name": "Aucune",
+                "reason": "Aucune sanction mentionnée",
+                "amount": "0",
+                "date": date,
+                "status": "Non appliquée"
+            }]
             extracted_data["sanctions_summary"] = sanctions
 
     return extracted_data
@@ -509,6 +522,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
           - Mappez ces colonnes aux clés : "name" (NOM), "reason" (RAISON), "amount" (MONTANT, sans "FCFA"), "date" (utilisez la date de la réunion actuelle : {date}), "status" (STATUT).
           - Ignorez la ligne d'en-tête du tableau (NOM | RAISON | etc.) et extrayez uniquement les lignes de données.
           - Assurez-vous d'extraire toutes les sanctions disponibles dans le contexte, même si elles sont sur plusieurs lignes.
+          - Si le tableau contient plusieurs sanctions, incluez-les toutes dans la liste.
           - Si aucune sanction n'est trouvée dans le contexte, utilisez les valeurs par défaut.
 
     **Exemple de sortie** :
@@ -562,6 +576,9 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         if "error" in extracted_data:
             st.error(f"Deepseek API error: {extracted_data['error']}. Falling back to basic extraction.")
             return extract_info_fallback(transcription, meeting_title, date, previous_context)
+
+        # Log the extracted sanctions for debugging
+        st.write(f"Sanctions extracted by API: {extracted_data.get('sanctions_summary', 'No sanctions extracted')}")
 
         # If end_time is "Non spécifié" but start_time and duration are available, calculate end_time
         if extracted_data.get("end_time") == "Non spécifié":
@@ -959,6 +976,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
 
         # Add sanctions summary
         sanctions = extracted_info.get("sanctions_summary", [])
+        st.write(f"Sanctions before generating table: {sanctions}")  # Debug log
         if not sanctions:
             sanctions = [{
                 "name": "Aucune",
