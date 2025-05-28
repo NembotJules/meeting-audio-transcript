@@ -125,17 +125,28 @@ def answer_question_with_context(question, context, deepseek_api_key):
     if not context or not question or not deepseek_api_key:
         return "Please provide a question, context, and Deepseek API key."
     
-    prompt = f"""
-    As an assistant, answer the following question based on the provided context.
+    if "tableau récapitulatif des sanctions" in question.lower():
+        prompt = f"""
+        Extract the 'RÉCAPITULATIF DES SANCTIONS' table from the context and return it as a JSON list of objects with keys 'name', 'reason', 'amount', 'date', 'status'.
 
-    **Context**:
-    {context}
+        **Context**:
+        {context}
 
-    **Question**:
-    {question}
+        **JSON**:
+        """
+    else:
+        prompt = f"""
+        As an assistant, answer the following question based on the provided context.
 
-    **Answer**:
-    """
+        **Context**:
+        {context}
+
+        **Question**:
+        {question}
+
+        **Answer**:
+        """
+    
     try:
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {deepseek_api_key}"}
         payload = {
@@ -146,7 +157,19 @@ def answer_question_with_context(question, context, deepseek_api_key):
         }
         response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload)
         if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"].strip()
+            raw_response = response.json()["choices"][0]["message"]["content"].strip()
+            if "tableau récapitulatif des sanctions" in question.lower():
+                cleaned_response = clean_json_response(raw_response)
+                if cleaned_response:
+                    try:
+                        sanctions = json.loads(cleaned_response)
+                        if isinstance(sanctions, list):
+                            st.session_state.context_sanctions = sanctions
+                            st.write(f"Stored sanctions in session state: {sanctions}")
+                            return json.dumps(sanctions, indent=2)
+                    except json.JSONDecodeError:
+                        st.write("Failed to parse sanctions as JSON, returning raw response")
+            return raw_response
         else:
             return f"API Error: {response.status_code}"
     except Exception as e:
@@ -158,55 +181,33 @@ def count_tokens(text):
         encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(text))
     else:
-        # Fallback: Simple token count based on whitespace and punctuation
         tokens = re.findall(r'\b\w+\b|[.,!?;]', text)
         return len(tokens)
 
 def clean_json_response(response):
-    """
-    Clean an API response to extract valid JSON content.
-    Returns the cleaned response as a string, or None if cleaning fails.
-    """
-    # Handle bytes input
+    """Clean an API response to extract valid JSON content."""
     if isinstance(response, bytes):
         try:
             response = response.decode('utf-8')
         except UnicodeDecodeError as e:
             st.error(f"Failed to decode response as UTF-8: {e}")
             return None
-
-    # Ensure the response is a string
     if not isinstance(response, str):
         st.error(f"Response is not a string or bytes: {type(response)}")
         return None
-
-    # Log the raw response for debugging
-    st.write(f"Raw API response before cleaning: {repr(response)}")
-
-    # Remove leading/trailing whitespace
     response = response.strip()
-
-    # Handle empty response
     if not response:
         st.error("Response is empty after stripping whitespace.")
         return None
-
-    # Remove Markdown code fences (e.g., ```json ... ``` or ``` ... ```)
     response = response.removeprefix('```json').removesuffix('```').strip()
     response = response.removeprefix('```').removesuffix('```').strip()
-
-    # Check if the response looks like JSON (starts with { or [)
     if not (response.startswith("{") or response.startswith("[")):
-        # Try to extract JSON from a larger text (e.g., "Here is the JSON: {...}")
         json_match = re.search(r'\{.*\}|\[.*\]', response, re.DOTALL)
         if json_match:
             response = json_match.group(0)
         else:
             st.error(f"Response does not contain valid JSON: {response}")
             return None
-
-    # Log the cleaned response
-    st.write(f"Cleaned response: {repr(response)}")
     return response
 
 def extract_info_fallback(transcription, meeting_title, date, previous_context=""):
@@ -227,7 +228,7 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         "meeting_title": meeting_title
     }
 
-    # Extract presence list (French keywords)
+    # Extract presence list
     present_match = re.search(r"(Présents|Présent|Présentes|Présente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
     absent_match = re.search(r"(Absents|Absent|Absentes|Absente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
     if present_match or absent_match:
@@ -235,9 +236,7 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         absent = absent_match.group(2).strip() if absent_match else "Non spécifié"
         extracted_data["presence_list"] = f"Présents: {present}\nAbsents: {absent}"
     else:
-        # Fallback to infer presence from names mentioned in the transcript
         names = re.findall(r"\b[A-Z][a-z]+(?: [A-Z][a-z]+)?\b", transcription)
-        # Filter out common words that might be mistaken as names
         common_words = {"Réunion", "Projet", "Président", "Rapporteur", "Solde", "Compte", "Ordre", "Agenda"}
         names = [name for name in set(names) if name not in common_words]
         if names:
@@ -249,7 +248,6 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         agenda_items = agenda_match.group(2).strip()
         items = [item.strip() for item in agenda_items.split("\n") if item.strip()]
         if items:
-            # Add Roman numerals if not present
             numbered_items = []
             for idx, item in enumerate(items, 1):
                 if not re.match(r"^[IVXLC]+\-", item):
@@ -258,38 +256,28 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             extracted_data["agenda_items"] = "\n".join(numbered_items)
 
     # Extract start time
-    start_time_pattern = r"(?:début|commence|commencée)[\s\w]*?(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))"
-    start_time_match = re.search(start_time_pattern, transcription, re.IGNORECASE)
+    start_time_match = re.search(r"(?:début|commence|commencée)[\s\w]*?(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))", transcription, re.IGNORECASE)
     if start_time_match:
         extracted_data["start_time"] = start_time_match.group(1).replace("h:", "h").replace("min", "min")
 
     # Extract duration and calculate end time if end time is not specified
-    duration_pattern = r"(?:durée|dure|duré|lasted)[\s\w]*?(\d{1,2}h(?:\d{1,2}min)?(?:\d{1,2}s)?)"
-    duration_match = re.search(duration_pattern, transcription, re.IGNORECASE)
-    end_time_pattern = r"(?:fin|terminée|terminé|ended)[\s\w]*?(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))"
-    end_time_match = re.search(end_time_pattern, transcription, re.IGNORECASE)
+    duration_match = re.search(r"(?:durée|dure|duré|lasted)[\s\w]*?(\d{1,2}h(?:\d{1,2}min)?(?:\d{1,2}s)?)", transcription, re.IGNORECASE)
+    end_time_match = re.search(r"(?:fin|terminée|terminé|ended)[\s\w]*?(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))", transcription, re.IGNORECASE)
 
     if end_time_match:
         extracted_data["end_time"] = end_time_match.group(1).replace("h:", "h").replace("min", "min")
     elif start_time_match and duration_match:
-        # Parse start time
         start_time_str = start_time_match.group(1).replace("h", ":").replace("min", "")
         try:
             start_time = datetime.strptime(start_time_str, "%H:%M")
         except ValueError:
             start_time = datetime.strptime(start_time_str, "%H")
 
-        # Parse duration
         duration_str = duration_match.group(1)
-        hours = minutes = seconds = 0
-        if "h" in duration_str:
-            hours = int(re.search(r"(\d+)h", duration_str).group(1))
-        if "min" in duration_str:
-            minutes = int(re.search(r"(\d+)min", duration_str).group(1))
-        if "s" in duration_str:
-            seconds = int(re.search(r"(\d+)s", duration_str).group(1))
+        hours = int(re.search(r"(\d+)h", duration_str).group(1)) if "h" in duration_str else 0
+        minutes = int(re.search(r"(\d+)min", duration_str).group(1)) if "min" in duration_str else 0
+        seconds = int(re.search(r"(\d+)s", duration_str).group(1)) if "s" in duration_str else 0
 
-        # Calculate end time
         duration_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
         end_time = start_time + duration_delta
         extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
@@ -319,7 +307,6 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         activities_lines = [line.strip() for line in activities_text.split("\n") if line.strip()]
         activities = []
         for line in activities_lines:
-            # Split the line into parts based on typical separators (e.g., "par", "sur", "résultat", etc.)
             actor_match = re.search(r"^[A-Z][a-z]+|^([A-Z][a-z]+(?: [A-Z][a-z]+)?)[\s,]", line)
             dossier_match = re.search(r"(?:dossier|sur le dossier) ([A-Za-z0-9\s]+)", line, re.IGNORECASE)
             activities_match = re.search(r"(?:activités|menées) ([A-Za-z\s,]+)", line, re.IGNORECASE)
@@ -345,11 +332,9 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
     resolution_section = re.search(r"(Résolution|Resolutions)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
     if resolution_section:
         resolution_text = resolution_section.group(2).strip()
-        # Split into individual resolutions if multiple are mentioned
         resolution_lines = [line.strip() for line in resolution_text.split("\n") if line.strip()]
         resolutions = []
         for res in resolution_lines:
-            # Try to extract responsible person and deadline
             responsible_match = re.search(r"(?:par|responsable|attribué à) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)", res, re.IGNORECASE)
             deadline_match = re.search(r"(?:d'ici|avant le) (\d{2}/\d{2}/\d{4})", res, re.IGNORECASE)
             responsible = responsible_match.group(1) if responsible_match else "Non spécifié"
@@ -387,55 +372,23 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
                 "status": "Appliquée"
             })
         extracted_data["sanctions_summary"] = sanctions
-        st.write(f"Sanctions extracted from transcript (fallback): {sanctions}")
+        st.write(f"Fallback: Sanctions extracted from transcript: {sanctions}")
     else:
-        # If no sanctions found in transcript, extract from previous context
-        if previous_context and previous_context != "Aucun contexte disponible.":
-            st.write(f"Previous context for sanctions extraction: {previous_context}")
-            sanctions = []
-            # Look for "RÉCAPITULATIF DES SANCTIONS" section in the context
-            sanction_section = re.search(r"RÉCAPITULATIF DES SANCTIONS([\s\S]*?)(?=\n[A-Z][A-Z\s]+:|\Z)", previous_context, re.IGNORECASE)
-            if sanction_section:
-                sanction_text = sanction_section.group(1).strip()
-                # Split into lines, assuming each line after the header is a sanction entry
-                sanction_lines = [line.strip() for line in sanction_text.split("\n") if line.strip()]
-                # Skip the header row (NOM | RAISON | MONTANT (FCFA) | DATE | STATUT)
-                if sanction_lines and "NOM" in sanction_lines[0].upper():
-                    sanction_lines = sanction_lines[1:]  # Skip header
-                
-                for line in sanction_lines:
-                    # Split the line into columns based on typical separators (e.g., "|", multiple spaces, tabs)
-                    parts = [part.strip() for part in re.split(r'\s*\|\s*|\t+|\s{2,}', line) if part.strip()]
-                    if len(parts) >= 5:
-                        sanctions.append({
-                            "name": parts[0] if parts[0] else "Non spécifié",
-                            "reason": parts[1] if parts[1] else "Non spécifié",
-                            "amount": parts[2].replace(" FCFA", "").replace("FCFA", "") if parts[2] else "0",
-                            "date": date,  # Use the current meeting date
-                            "status": parts[4] if parts[4] else "Appliquée"
-                        })
-            
-            # If no sanctions found in context, use default
-            if not sanctions:
-                sanctions = [{
-                    "name": "Aucune",
-                    "reason": "Aucune sanction mentionnée",
-                    "amount": "0",
-                    "date": date,
-                    "status": "Non appliquée"
-                }]
+        if "context_sanctions" in st.session_state:
+            sanctions = st.session_state.context_sanctions
+            for sanction in sanctions:
+                sanction["date"] = date
             extracted_data["sanctions_summary"] = sanctions
-            st.write(f"Sanctions extracted from context (fallback): {sanctions}")
+            st.write(f"Fallback: Using stored context_sanctions with updated date: {sanctions}")
         else:
-            st.write("No previous context available for sanctions extraction.")
-            sanctions = [{
+            extracted_data["sanctions_summary"] = [{
                 "name": "Aucune",
                 "reason": "Aucune sanction mentionnée",
                 "amount": "0",
                 "date": date,
                 "status": "Non appliquée"
             }]
-            extracted_data["sanctions_summary"] = sanctions
+            st.write("Fallback: No sanctions found, using default")
 
     return extracted_data
 
@@ -501,11 +454,6 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     8. **activities_review** : Liste de dictionnaires pour la revue des activités.
        - Recherchez les mentions sous "Revue des activités" ou "Activités de la semaine" dans le transcript.
        - Clés : "actor", "dossier", "activities", "results", "perspectives".
-       - "actor" : La personne en charge du dossier (qui l'a présenté).
-       - "dossier" : Le dossier sur lequel la personne travaille.
-       - "activities" : Les activités menées par la personne pendant la semaine sur le dossier.
-       - "results" : Les résultats obtenus sur le dossier.
-       - "perspectives" : Les actions prévues dans le futur proche sur le dossier.
        - Par défaut : "actor": "Non spécifié", "dossier": "Non spécifié", "activities": "Non spécifié", "results": "Non spécifié", "perspectives": "Non spécifié".
 
     9. **resolutions_summary** : Liste de dictionnaires pour les résolutions.
@@ -517,16 +465,8 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         - Clés : "name", "reason", "amount", "date" (JJ/MM/AAAA), "status".
         - Par défaut : "name": "Aucune", "reason": "Aucune sanction mentionnée", "amount": "0", "status": "Non appliquée".
         - Recherchez les mentions sous "Sanction" ou "Amende" dans le transcript.
-        - **Si aucune sanction n'est trouvée dans le transcript**, extrayez les sanctions du **contexte de la réunion précédente** (fourni ci-dessus) sous la section "RÉCAPITULATIF DES SANCTIONS".
-          - Dans le contexte, les sanctions sont présentées dans un tableau avec les colonnes : NOM | RAISON | MONTANT (FCFA) | DATE | STATUT.
-          - Mappez ces colonnes aux clés : "name" (NOM), "reason" (RAISON), "amount" (MONTANT, sans "FCFA"), "date" (utilisez la date de la réunion actuelle : {date}), "status" (STATUT).
-          - Ignorez la ligne d'en-tête du tableau (NOM | RAISON | etc.) et extrayez uniquement les lignes de données.
-          - Assurez-vous d'extraire toutes les sanctions disponibles dans le contexte, même si elles sont sur plusieurs lignes.
-          - Si le tableau contient plusieurs sanctions, incluez-les toutes dans la liste.
-          - Si aucune sanction n'est trouvée dans le contexte, utilisez les valeurs par défaut.
-
-    **Exemple de sortie** :
-    {{"presence_list": "Présents: Alice, Bob\nAbsents: Charlie", "agenda_items": "I- Revue\nII- Résolutions", "president": "Alice", "rapporteur": "Bob", "start_time": "10h00min", "end_time": "11h00min", "balance_amount": "827540", "balance_date": "15/05/2025", "activities_review": [{{"actor": "Alice", "dossier": "Projet A", "activities": "Analyse des données", "results": "Rapport préliminaire terminé", "perspectives": "Planification de la phase 2"}}], "resolutions_summary": [{{"date": "15/05/2025", "dossier": "Projet X", "resolution": "Finaliser le rapport", "responsible": "Alice", "deadline": "20/05/2025", "execution_date": "", "status": "En cours", "report_count": "0"}}], "sanctions_summary": [{{"name": "Charlie", "reason": "Retard", "amount": "5000", "date": "15/05/2025", "status": "Appliquée"}}]}}
+        - Si aucune sanction dans le transcript, extrayez les sanctions du contexte sous "RÉCAPITULATIF DES SANCTIONS".
+          - Mappez les colonnes : "name" (NOM), "reason" (RAISON), "amount" (MONTANT, sans "FCFA"), "date" ({date}), "status" (STATUT).
     """
     try:
         headers = {
@@ -545,88 +485,48 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             json=payload
         )
         if response.status_code != 200:
-            st.error(f"Deepseek API error: Status {response.status_code}, Message: {response.text}. Falling back to basic extraction.")
+            st.error(f"Deepseek API error: Status {response.status_code}. Falling back.")
             return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
-        # Log the full response for debugging
-        full_response = response.json()
-        st.write(f"Full Deepseek response: {json.dumps(full_response, indent=2)}")
-        
-        # Extract the content
-        raw_response = full_response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        
-        # Clean the response
+        raw_response = response.json()["choices"][0]["message"]["content"].strip()
         cleaned_response = clean_json_response(raw_response)
-        if cleaned_response is None:
-            st.error("Failed to clean API response into valid JSON. Falling back to basic extraction.")
+        if not cleaned_response:
+            st.error("Failed to clean JSON response. Falling back.")
             return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
-        # Count tokens in the API response and the cleaned response
-        api_tokens = full_response.get("usage", {}).get("completion_tokens", 0)
-        displayed_tokens = count_tokens(cleaned_response)
-        token_difference = api_tokens - displayed_tokens
-        st.write(f"Token Count - API Response: {api_tokens}, Displayed Response: {displayed_tokens}, Difference: {token_difference}")
-        if token_difference > 0:
-            st.warning("The displayed response has fewer tokens than the API response, indicating possible truncation during cleaning.")
-
-        # Attempt to parse the cleaned response as JSON
         extracted_data = json.loads(cleaned_response)
-        
-        # Check if the response contains an error key
         if "error" in extracted_data:
-            st.error(f"Deepseek API error: {extracted_data['error']}. Falling back to basic extraction.")
+            st.error(f"API error: {extracted_data['error']}. Falling back.")
             return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
-        # Log the extracted sanctions for debugging
-        st.write(f"Sanctions extracted by API: {extracted_data.get('sanctions_summary', 'No sanctions extracted')}")
+        # Log extracted sanctions
+        st.write(f"API extracted sanctions_summary: {extracted_data.get('sanctions_summary', 'None')}")
 
-        # If end_time is "Non spécifié" but start_time and duration are available, calculate end_time
-        if extracted_data.get("end_time") == "Non spécifié":
-            start_time_str = extracted_data.get("start_time", "Non spécifié")
-            duration_match = re.search(r"(?:durée|dure|duré|lasted)[\s\w]*?(\d{1,2}h(?:\d{1,2}min)?(?:\d{1,2}s)?)", transcription, re.IGNORECASE)
-            if start_time_str != "Non spécifié" and duration_match:
-                # Parse start time
-                start_time_cleaned = start_time_str.replace("h", ":").replace("min", "")
-                try:
-                    start_time = datetime.strptime(start_time_cleaned, "%H:%M")
-                except ValueError:
-                    start_time = datetime.strptime(start_time_cleaned, "%H")
+        # Use stored sanctions if none found and context_sanctions exists
+        if not extracted_data.get("sanctions_summary") and "context_sanctions" in st.session_state:
+            sanctions = st.session_state.context_sanctions
+            for sanction in sanctions:
+                sanction["date"] = date
+            extracted_data["sanctions_summary"] = sanctions
+            st.write(f"Using stored context_sanctions: {sanctions}")
 
-                # Parse duration
-                duration_str = duration_match.group(1)
-                hours = minutes = seconds = 0
-                if "h" in duration_str:
-                    hours = int(re.search(r"(\d+)h", duration_str).group(1))
-                if "min" in duration_str:
-                    minutes = int(re.search(r"(\d+)min", duration_str).group(1))
-                if "s" in duration_str:
-                    seconds = int(re.search(r"(\d+)s", duration_str).group(1))
-
-                # Calculate end time
-                duration_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
-                end_time = start_time + duration_delta
-                extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
-        
         # Add meeting metadata
         extracted_data["date"] = date
         extracted_data["meeting_title"] = meeting_title
         return extracted_data
 
-    except json.JSONDecodeError as e:
-        st.error(f"Error parsing JSON after cleaning: {e}. Cleaned response: {repr(cleaned_response)}. Falling back to basic extraction.")
-        return extract_info_fallback(transcription, meeting_title, date, previous_context)
     except Exception as e:
-        st.error(f"Error extracting information: {e}. Falling back to basic extraction.")
+        st.error(f"Error extracting info: {e}. Falling back.")
         return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
 def set_cell_background(cell, rgb_color):
-    """Set the background color of a table cell using RGB values."""
+    """Set the background color of a table cell."""
     shading_elm = OxmlElement('w:shd')
     shading_elm.set(qn('w:fill'), f"{rgb_color[0]:02X}{rgb_color[1]:02X}{rgb_color[2]:02X}")
     cell._element.get_or_add_tcPr().append(shading_elm)
 
 def set_cell_margins(cell, top=0.1, bottom=0.1, left=0.1, right=0.1):
-    """Set the margins of a table cell to adjust padding."""
+    """Set the margins of a table cell."""
     tc = cell._element
     tcPr = tc.get_or_add_tcPr()
     tcMar = OxmlElement('w:tcMar')
@@ -638,7 +538,7 @@ def set_cell_margins(cell, top=0.1, bottom=0.1, left=0.1, right=0.1):
     tcPr.append(tcMar)
 
 def set_table_width(table, width_in_inches):
-    """Set the width of the table and allow columns to adjust proportionally."""
+    """Set the width of the table."""
     table.autofit = False
     table.allow_autofit = False
     table_width = Inches(width_in_inches)
@@ -649,7 +549,7 @@ def set_table_width(table, width_in_inches):
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
 def set_column_widths(table, widths_in_inches):
-    """Set preferred widths for each column in the table."""
+    """Set preferred widths for each column."""
     for i, width in enumerate(widths_in_inches):
         for row in table.rows:
             cell = row.cells[i]
@@ -668,7 +568,7 @@ def add_styled_paragraph(doc, text, font_name="Century", font_size=12, bold=Fals
     return p
 
 def add_styled_table(doc, rows, cols, headers, data, header_bg_color=(0, 0, 0), header_text_color=(255, 255, 255), alt_row_bg_color=(192, 192, 192), column_widths=None, table_width=6.5):
-    """Add a styled table to the document with background colors and custom widths."""
+    """Add a styled table to the document."""
     table = doc.add_table(rows=rows, cols=cols)
     try:
         table.style = "Table Grid"
@@ -722,11 +622,11 @@ def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14, box_width
     return table
 
 def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date):
-    """Build the Word document from scratch using python-docx and return the file data for download."""
+    """Build the Word document from scratch."""
     try:
         doc = Document()
 
-        # Extract presence list and split into present and absent attendees
+        # Extract presence list
         presence_list = extracted_info.get("presence_list", "Présents: Non spécifié\nAbsents: Non spécifié")
         present_attendees = []
         absent_attendees = []
@@ -737,7 +637,6 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                 if part.startswith("Présents:"):
                     presents = part.replace("Présents:", "").strip()
                     present_attendees = [name.strip() for name in presents.split(",") if name.strip()]
-                    # Add "(Président)" to the president's name if they are in the present list
                     if president != "Non spécifié":
                         for i, attendee in enumerate(present_attendees):
                             if attendee.lower() == president.lower():
@@ -748,288 +647,65 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                     absent_attendees = [name.strip() for name in absents.split(",") if name.strip()]
         else:
             present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Non spécifié" else []
-            # Add "(Président)" to the president's name if they are in the present list
-            if president != "Non spécifié":
-                for i, attendee in enumerate(present_attendees):
-                    if attendee.lower() == president.lower():
-                        present_attendees[i] = f"{attendee} (Président)"
-                        break
 
         # Process agenda items
         agenda_list = extracted_info.get("agenda_items", "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers").split("\n")
         agenda_list = [item.strip() for item in agenda_list if item.strip()]
 
-        # Add header box
-        add_text_in_box(
-            doc,
-            "Direction Recherches et Investissements",
-            bg_color=(192, 192, 192),
-            font_size=16,
-            box_width_in_inches=5.0
-        )
-
-        # Add meeting title
-        add_styled_paragraph(
-            doc,
-            "COMPTE RENDU DE RÉUNION",
-            font_name="Century",
-            font_size=12,
-            bold=True,
-            color=RGBColor(192, 0, 0),
-            alignment=WD_ALIGN_PARAGRAPH.CENTER
-        )
-
-        # Add date
-        add_styled_paragraph(
-            doc,
-            extracted_info.get("date", ""),
-            font_name="Century",
-            font_size=12,
-            bold=True,
-            color=RGBColor(192, 0, 0),
-            alignment=WD_ALIGN_PARAGRAPH.CENTER
-        )
-
-        # Add start and end times
-        add_styled_paragraph(
-            doc,
-            f"Heure de début: {extracted_info.get('start_time', 'Non spécifié')}",
-            font_name="Century",
-            font_size=12,
-            bold=True,
-            alignment=WD_ALIGN_PARAGRAPH.CENTER
-        )
-        add_styled_paragraph(
-            doc,
-            f"Heure de fin: {extracted_info.get('end_time', 'Non spécifié')}",
-            font_name="Century",
-            font_size=12,
-            bold=True,
-            alignment=WD_ALIGN_PARAGRAPH.CENTER
-        )
-
-        # Add rapporteur
+        # Add header
+        add_text_in_box(doc, "Direction Recherches et Investissements", bg_color=(192, 192, 192), font_size=16)
+        add_styled_paragraph(doc, "COMPTE RENDU DE RÉUNION", bold=True, color=RGBColor(192, 0, 0), alignment=WD_ALIGN_PARAGRAPH.CENTER)
+        add_styled_paragraph(doc, extracted_info.get("date", ""), bold=True, color=RGBColor(192, 0, 0), alignment=WD_ALIGN_PARAGRAPH.CENTER)
+        add_styled_paragraph(doc, f"Heure de début: {extracted_info.get('start_time', 'Non spécifié')}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+        add_styled_paragraph(doc, f"Heure de fin: {extracted_info.get('end_time', 'Non spécifié')}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
         rapporteur = extracted_info.get("rapporteur", "Non spécifié")
         if rapporteur != "Non spécifié":
-            add_styled_paragraph(
-                doc,
-                f"Rapporteur: {rapporteur}",
-                font_name="Century",
-                font_size=12,
-                bold=True,
-                alignment=WD_ALIGN_PARAGRAPH.CENTER
-            )
+            add_styled_paragraph(doc, f"Rapporteur: {rapporteur}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
 
         # Add attendance table
-        add_styled_paragraph(
-            doc,
-            "◆ LISTE DE PRÉSENCE",
-            font_name="Century",
-            font_size=12,
-            bold=True
-        )
-
+        add_styled_paragraph(doc, "◆ LISTE DE PRÉSENCE", bold=True)
         if present_attendees or absent_attendees:
-            max_rows = max(len(present_attendees), len(absent_attendees))
-            if max_rows == 0:
-                max_rows = 1
+            max_rows = max(len(present_attendees), len(absent_attendees)) or 1
             attendance_data = []
             for i in range(max_rows):
                 present_text = present_attendees[i] if i < len(present_attendees) else ""
                 absent_text = absent_attendees[i] if i < len(absent_attendees) else ""
                 attendance_data.append([present_text, absent_text])
-            
-            attendance_column_widths = [4.5, 4.5]
-            add_styled_table(
-                doc,
-                rows=max_rows + 1,
-                cols=2,
-                headers=["PRÉSENTS", "ABSENTS"],
-                data=attendance_data,
-                header_bg_color=(0, 0, 0),
-                header_text_color=(255, 255, 255),
-                alt_row_bg_color=(192, 192, 192),
-                column_widths=attendance_column_widths,
-                table_width=9.0
-            )
+            add_styled_table(doc, max_rows + 1, 2, ["PRÉSENTS", "ABSENTS"], attendance_data, column_widths=[4.5, 4.5], table_width=9.0)
         else:
-            add_styled_paragraph(
-                doc,
-                "Aucune présence spécifiée.",
-                font_name="Century",
-                font_size=12
-            )
+            add_styled_paragraph(doc, "Aucune présence spécifiée.")
 
-        # Add page break before "Ordre du jour"
         doc.add_page_break()
 
-        # Add agenda items
-        add_styled_paragraph(
-            doc,
-            "◆ Ordre du jour",
-            font_name="Century",
-            font_size=12,
-            bold=True
-        )
+        # Add agenda
+        add_styled_paragraph(doc, "◆ Ordre du jour", bold=True)
         for item in agenda_list:
-            add_styled_paragraph(
-                doc,
-                item,
-                font_name="Century",
-                font_size=12
-            )
+            add_styled_paragraph(doc, item)
 
-        # Add page break after "Ordre du jour" to isolate it
         doc.add_page_break()
 
-        # Add activities review table
-        activities = extracted_info.get("activities_review", [])
-        if not activities:
-            activities = [{
-                "actor": "Non spécifié",
-                "dossier": "Non spécifié",
-                "activities": "Non spécifié",
-                "results": "Non spécifié",
-                "perspectives": "Non spécifié"
-            }]
-        add_styled_paragraph(
-            doc,
-            "REVUE DES ACTIVITÉS",
-            font_name="Century",
-            font_size=12,
-            bold=True,
-            color=RGBColor(192, 0, 0)
-        )
-        activities_headers = ["ACTEURS", "DOSSIERS", "ACTIVITÉS", "RÉSULTATS", "PERSPECTIVES"]
-        activities_data = []
-        for activity in activities:
-            row_data = [
-                activity.get("actor", ""),
-                activity.get("dossier", ""),
-                activity.get("activities", ""),
-                activity.get("results", ""),
-                activity.get("perspectives", "")
-            ]
-            activities_data.append(row_data)
-        activities_column_widths = [2.0, 2.0, 2.5, 2.0, 2.0]
-        add_styled_table(
-            doc,
-            rows=len(activities) + 1,
-            cols=5,
-            headers=activities_headers,
-            data=activities_data,
-            header_bg_color=(0, 0, 0),
-            header_text_color=(255, 255, 255),
-            alt_row_bg_color=(192, 192, 192),
-            column_widths=activities_column_widths,
-            table_width=10.5
-        )
+        # Add activities review
+        activities = extracted_info.get("activities_review", [{"actor": "Non spécifié", "dossier": "Non spécifié", "activities": "Non spécifié", "results": "Non spécifié", "perspectives": "Non spécifié"}])
+        add_styled_paragraph(doc, "REVUE DES ACTIVITÉS", bold=True, color=RGBColor(192, 0, 0))
+        activities_data = [[a.get("actor", ""), a.get("dossier", ""), a.get("activities", ""), a.get("results", ""), a.get("perspectives", "")] for a in activities]
+        add_styled_table(doc, len(activities) + 1, 5, ["ACTEURS", "DOSSIERS", "ACTIVITÉS", "RÉSULTATS", "PERSPECTIVES"], activities_data, column_widths=[2.0, 2.0, 2.5, 2.0, 2.0], table_width=10.5)
 
-        # Add resolutions summary
-        resolutions = extracted_info.get("resolutions_summary", [])
-        if not resolutions:
-            resolutions = [{
-                "date": extracted_info.get("date", ""),
-                "dossier": "Non spécifié",
-                "resolution": "Non spécifié",
-                "responsible": "Non spécifié",
-                "deadline": "Non spécifié",
-                "execution_date": "",
-                "status": "En cours",
-                "report_count": "0"
-            }]
-        add_styled_paragraph(
-            doc,
-            "RÉCAPITULATIF DES RÉSOLUTIONS",
-            font_name="Century",
-            font_size=12,
-            bold=True,
-            color=RGBColor(192, 0, 0)
-        )
-        resolutions_headers = ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"]
-        resolutions_data = []
-        for resolution in resolutions:
-            row_data = [
-                resolution.get("date", ""),
-                resolution.get("dossier", ""),
-                resolution.get("resolution", ""),
-                resolution.get("responsible", ""),
-                resolution.get("deadline", ""),
-                resolution.get("execution_date", ""),
-                resolution.get("status", ""),
-                str(resolution.get("report_count", ""))
-            ]
-            resolutions_data.append(row_data)
-        resolutions_column_widths = [1.5, 1.8, 2.5, 1.2, 1.8, 1.5, 1.2, 1.5]
-        add_styled_table(
-            doc,
-            rows=len(resolutions) + 1,
-            cols=8,
-            headers=resolutions_headers,
-            data=resolutions_data,
-            header_bg_color=(0, 0, 0),
-            header_text_color=(255, 255, 255),
-            alt_row_bg_color=(192, 192, 192),
-            column_widths=resolutions_column_widths,
-            table_width=12.0
-        )
+        # Add resolutions
+        resolutions = extracted_info.get("resolutions_summary", [{"date": extracted_info.get("date", ""), "dossier": "Non spécifié", "resolution": "Non spécifié", "responsible": "Non spécifié", "deadline": "Non spécifié", "execution_date": "", "status": "En cours", "report_count": "0"}])
+        add_styled_paragraph(doc, "RÉCAPITULATIF DES RÉSOLUTIONS", bold=True, color=RGBColor(192, 0, 0))
+        resolutions_data = [[r.get("date", ""), r.get("dossier", ""), r.get("resolution", ""), r.get("responsible", ""), r.get("deadline", ""), r.get("execution_date", ""), r.get("status", ""), str(r.get("report_count", ""))] for r in resolutions]
+        add_styled_table(doc, len(resolutions) + 1, 8, ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"], resolutions_data, column_widths=[1.5, 1.8, 2.5, 1.2, 1.8, 1.5, 1.2, 1.5], table_width=12.0)
 
-        # Add sanctions summary
-        sanctions = extracted_info.get("sanctions_summary", [])
-        st.write(f"Sanctions before generating table: {sanctions}")  # Debug log
-        if not sanctions:
-            sanctions = [{
-                "name": "Aucune",
-                "reason": "Aucune sanction mentionnée",
-                "amount": "0",
-                "date": extracted_info.get("date", ""),
-                "status": "Non appliquée"
-            }]
-        add_styled_paragraph(
-            doc,
-            "RÉCAPITULATIF DES SANCTIONS",
-            font_name="Century",
-            font_size=12,
-            bold=True,
-            color=RGBColor(192, 0, 0)
-        )
-        sanctions_headers = ["NOM", "RAISON", "MONTANT (FCFA)", "DATE", "STATUT"]
-        sanctions_data = []
-        for sanction in sanctions:
-            row_data = [
-                sanction.get("name", ""),
-                sanction.get("reason", ""),
-                sanction.get("amount", ""),
-                sanction.get("date", ""),
-                sanction.get("status", "")
-            ]
-            sanctions_data.append(row_data)
-        sanctions_column_widths = [2.0, 2.5, 2.0, 1.8, 2.2]
-        add_styled_table(
-            doc,
-            rows=len(sanctions) + 1,
-            cols=5,
-            headers=sanctions_headers,
-            data=sanctions_data,
-            header_bg_color=(0, 0, 0),
-            header_text_color=(255, 255, 255),
-            alt_row_bg_color=(192, 192, 192),
-            column_widths=sanctions_column_widths,
-            table_width=10.5
-        )
+        # Add sanctions
+        sanctions = extracted_info.get("sanctions_summary", [{"name": "Aucune", "reason": "Aucune sanction mentionnée", "amount": "0", "date": extracted_info.get("date", ""), "status": "Non appliquée"}])
+        add_styled_paragraph(doc, "RÉCAPITULATIF DES SANCTIONS", bold=True, color=RGBColor(192, 0, 0))
+        sanctions_data = [[s.get("name", ""), s.get("reason", ""), s.get("amount", ""), s.get("date", ""), s.get("status", "")] for s in sanctions]
+        add_styled_table(doc, len(sanctions) + 1, 5, ["NOM", "RAISON", "MONTANT (FCFA)", "DATE", "STATUT"], sanctions_data, column_widths=[2.0, 2.5, 2.0, 1.8, 2.2], table_width=10.5)
 
-        # Add a blank paragraph for spacing
-        doc.add_paragraph("")
+        # Add balance
+        add_styled_paragraph(doc, f"Solde du compte de solidarité DRI (00001-00921711101-10) est de XAF {extracted_info.get('balance_amount', 'Non spécifié')} au {extracted_info.get('balance_date', '')}.")
 
-        # Add balance information
-        add_styled_paragraph(
-            doc,
-            f"Solde du compte de solidarité DRI (00001-00921711101-10) est de XAF {extracted_info.get('balance_amount', 'Non spécifié')} au {extracted_info.get('balance_date', '')}.",
-            font_name="Century",
-            font_size=12
-        )
-
-        # Save the document to a temporary file
+        # Save to temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             doc.save(tmp.name)
             with open(tmp.name, "rb") as f:
@@ -1038,60 +714,50 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         return docx_data
 
     except Exception as e:
-        st.error(f"Error generating Word document: {e}")
+        st.error(f"Error generating document: {e}")
         return None
 
 def main():
     st.title("Meeting Transcription Tool")
     
-    # Sidebar for API keys and previous report
+    # Sidebar
     st.sidebar.header("Configuration")
     st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
     st.session_state.deepseek_api_key = st.sidebar.text_input("Deepseek API Key", type="password")
     
     st.sidebar.header("Contexte Précédent")
-    previous_report = st.sidebar.file_uploader("Télécharger le rapport précédent (optionnel)", type=["pdf", "png", "jpg", "jpeg"])
+    previous_report = st.sidebar.file_uploader("Télécharger le rapport précédent", type=["pdf", "png", "jpg", "jpeg"])
     if previous_report:
         st.session_state.previous_report = previous_report
-        st.session_state.previous_context = ""  # Reset context until a question is asked
-        st.sidebar.write("Rapport précédent téléchargé. Posez une question pour extraire le contexte.")
+        st.session_state.previous_context = ""
+        st.sidebar.write("Rapport téléchargé. Posez une question pour extraire le contexte.")
     else:
         st.session_state.previous_report = None
         st.session_state.previous_context = ""
     
-    # Section to ask questions about the context
+    # Test context
     st.sidebar.header("Tester le Contexte")
     question = st.sidebar.text_input("Posez une question sur le rapport précédent :")
     if st.sidebar.button("Poser la Question") and question:
-        if not st.session_state.mistral_api_key:
-            st.sidebar.error("Veuillez fournir une clé API Mistral pour extraire le contexte.")
-        elif not st.session_state.previous_report:
-            st.sidebar.error("Veuillez télécharger un rapport précédent pour extraire le contexte.")
+        if not st.session_state.mistral_api_key or not st.session_state.previous_report:
+            st.sidebar.error("Fournissez une clé API Mistral et un rapport précédent.")
         else:
             with st.spinner("Extraction du contexte..."):
-                context = extract_context_from_report(
-                    st.session_state.previous_report, 
-                    st.session_state.mistral_api_key
-                )
+                context = extract_context_from_report(st.session_state.previous_report, st.session_state.mistral_api_key)
                 if context:
                     st.session_state.previous_context = context
                     st.sidebar.text_area("Contexte Extrait", context, height=200)
-                    st.sidebar.success("Contexte extrait avec succès !")
+                    st.sidebar.success("Contexte extrait !")
                 else:
                     st.session_state.previous_context = ""
-                    st.sidebar.error("Échec de l'extraction du contexte. Vérifiez la clé API ou le fichier.")
+                    st.sidebar.error("Échec de l'extraction.")
             
-            # Now answer the question
             with st.spinner("Obtention de la réponse..."):
-                answer = answer_question_with_context(
-                    question, 
-                    st.session_state.previous_context, 
-                    st.session_state.deepseek_api_key
-                )
+                answer = answer_question_with_context(question, st.session_state.previous_context, st.session_state.deepseek_api_key)
             st.sidebar.write("**Réponse :**")
             st.sidebar.write(answer)
     
-    # Main app content
+    # Main content
     col1, col2 = st.columns(2)
     
     with col1:
@@ -1101,64 +767,43 @@ def main():
     
     with col2:
         st.header("Transcription & Résultat")
-        input_method = st.radio("Choisissez la méthode d'entrée :", ("Télécharger Audio", "Entrer la Transcription"))
+        input_method = st.radio("Méthode d'entrée :", ("Télécharger Audio", "Entrer la Transcription"))
         
         if input_method == "Télécharger Audio":
             uploaded_file = st.file_uploader("Téléchargez un fichier audio", type=["mp3", "wav", "m4a", "flac"])
             whisper_model = st.selectbox("Modèle Whisper", ["tiny", "base", "small", "medium", "large"], index=1)
             
-            if uploaded_file is not None:
+            if uploaded_file and st.button("Transcrire l'Audio"):
                 file_extension = uploaded_file.name.split('.')[-1].lower()
-                if st.button("Transcrire l'Audio"):
-                    with st.spinner(f"Transcription avec Whisper {whisper_model}..."):
-                        transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
-                        if transcription and not transcription.startswith("Error"):
-                            st.session_state.transcription = transcription
-                            # Automatically extract information after transcription
-                            with st.spinner("Extraction des informations..."):
-                                extracted_info = extract_info(
-                                    st.session_state.transcription,
-                                    meeting_title,
-                                    meeting_date.strftime("%d/%m/%Y"),
-                                    st.session_state.deepseek_api_key,
-                                    st.session_state.get("previous_context", "")
-                                )
-                                if extracted_info:
-                                    st.session_state.extracted_info = extracted_info
-                                    st.text_area("Informations Extraites", json.dumps(extracted_info, indent=2), height=300)
+                with st.spinner(f"Transcription avec Whisper {whisper_model}..."):
+                    transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
+                    if transcription and not transcription.startswith("Error"):
+                        st.session_state.transcription = transcription
+                        with st.spinner("Extraction des informations..."):
+                            extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""))
+                            if extracted_info:
+                                st.session_state.extracted_info = extracted_info
+                                st.text_area("Informations Extraites", json.dumps(extracted_info, indent=2), height=300)
         else:
-            transcription_input = st.text_area("Entrez la transcription de la réunion :", height=200)
+            transcription_input = st.text_area("Entrez la transcription :", height=200)
             if st.button("Soumettre la Transcription") and transcription_input:
                 st.session_state.transcription = transcription_input
-                # Automatically extract information after submission
                 with st.spinner("Extraction des informations..."):
-                    extracted_info = extract_info(
-                        st.session_state.transcription,
-                        meeting_title,
-                        meeting_date.strftime("%d/%m/%Y"),
-                        st.session_state.deepseek_api_key,
-                        st.session_state.get("previous_context", "")
-                    )
+                    extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""))
                     if extracted_info:
                         st.session_state.extracted_info = extracted_info
                         st.text_area("Informations Extraites", json.dumps(extracted_info, indent=2), height=300)
         
-        if 'extracted_info' in st.session_state:
-            if st.button("Générer et Télécharger le Document"):
-                with st.spinner("Génération du document..."):
-                    docx_data = fill_template_and_generate_docx(
-                        st.session_state.extracted_info,
-                        meeting_title,
-                        meeting_date
+        if 'extracted_info' in st.session_state and st.button("Générer et Télécharger le Document"):
+            with st.spinner("Génération du document..."):
+                docx_data = fill_template_and_generate_docx(st.session_state.extracted_info, meeting_title, meeting_date)
+                if docx_data:
+                    st.download_button(
+                        label="Télécharger le Document",
+                        data=docx_data,
+                        file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
-                    if docx_data:
-                        st.download_button(
-                            label="Télécharger le Document",
-                            data=docx_data,
-                            file_name=f"{meeting_title}_{meeting_date.strftime('%Y-%m-%d')}_notes.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            key="download-button"
-                        )
 
 if __name__ == "__main__":
     main()
