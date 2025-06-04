@@ -140,56 +140,52 @@ class MeetingProcessor:
         Meeting Note Text:
         {text}
         
-        Format the output as valid JSON with these exact keys:
-        {
-            "meeting_metadata": {
-                "date": "DD/MM/YYYY",
-                "title": "string"
-            },
-            "attendance": {
-                "present": ["name1", "name2"],
-                "absent": ["name3"]
-            },
-            "agenda_items": [
-                "string"
-            ],
+        Expected JSON structure:
+        {{
+            "meeting_metadata": {{
+                "date": "{meeting_date}",
+                "title": "{meeting_title}"
+            }},
+            "attendance": {{
+                "present": [],
+                "absent": []
+            }},
+            "agenda_items": [],
             "activities_review": [
-                {
-                    "actor": "string",
-                    "dossier": "string",
-                    "activities": "string",
-                    "results": "string",
-                    "perspectives": "string"
-                }
+                {{
+                    "actor": "",
+                    "dossier": "",
+                    "activities": "",
+                    "results": "",
+                    "perspectives": ""
+                }}
             ],
             "resolutions_summary": [
-                {
-                    "date": "DD/MM/YYYY",
-                    "dossier": "string",
-                    "resolution": "string",
-                    "responsible": "string",
-                    "deadline": "DD/MM/YYYY",
-                    "status": "string"
-                }
+                {{
+                    "date": "",
+                    "dossier": "",
+                    "resolution": "",
+                    "responsible": "",
+                    "deadline": "",
+                    "status": ""
+                }}
             ],
-            "key_highlights": [
-                "string"
-            ],
-            "miscellaneous": [
-                "string"
-            ],
+            "key_highlights": [],
+            "miscellaneous": [],
             "sanctions_summary": [
-                {
-                    "name": "string",
-                    "reason": "string",
-                    "amount": "number",
-                    "date": "DD/MM/YYYY",
-                    "status": "string"
-                }
+                {{
+                    "name": "",
+                    "reason": "",
+                    "amount": 0,
+                    "date": "",
+                    "status": ""
+                }}
             ]
-        }
+        }}
         
+        Extract the information from the meeting note and format it according to this structure.
         Ensure all dates are in DD/MM/YYYY format and the JSON is valid.
+        Return ONLY the JSON, no additional text.
         """
         
         try:
