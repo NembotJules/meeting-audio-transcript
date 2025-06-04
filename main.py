@@ -17,6 +17,8 @@ import torchaudio
 import json
 import re
 import base64
+from vector_store import MeetingVectorStore
+from prompt_manager import PromptManager
 
 # Try to import tiktoken for accurate token counting; fall back to simple method if unavailable
 try:
@@ -29,6 +31,16 @@ except ImportError:
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Meeting Transcription Tool", page_icon=":microphone:", layout="wide")
+
+# Initialize vector store and prompt manager as global variables
+vector_store = MeetingVectorStore()
+prompt_manager = PromptManager()
+
+# Add vector store persistence directory to session state
+if 'vector_store_dir' not in st.session_state:
+    st.session_state.vector_store_dir = "meeting_store"
+    if os.path.exists(st.session_state.vector_store_dir):
+        vector_store.load(st.session_state.vector_store_dir)
 
 def transcribe_audio(audio_file, file_extension, model_size="base"):
     """Transcribe the uploaded audio file to text using the Whisper model"""
@@ -221,7 +233,7 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
     """Fallback function to extract information using improved string parsing and regex."""
     extracted_data = {
         "presence_list": "Présents: Non spécifié\nAbsents: Non spécifié",
-        "agenda_items": "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers",
+        "agenda_items": "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d'activités\nIV- Faits saillants\nV- Divers",
         "activities_review": [],
         "resolutions_summary": [],
         "sanctions_summary": [],  # Start with empty list
@@ -400,71 +412,22 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     if not transcription or not deepseek_api_key:
         return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
-    # Append previous context to transcription
-    full_transcription = f"{transcription}\n\n**Contexte Précédent**:\n{previous_context}" if previous_context else transcription
+    # Get relevant context from vector store
+    relevant_meetings = vector_store.get_relevant_context(transcription, k=3)
+    context_text = "\n\n".join([
+        f"Meeting from {meeting['date']}:\n{json.dumps(meeting['extracted_info'], indent=2)}"
+        for meeting in relevant_meetings
+    ])
 
-    prompt = f"""
-    Vous êtes un assistant IA chargé d'extraire des informations clés d'un transcript de réunion en français pour une institution bancaire. Votre tâche est de produire un JSON structuré avec des clés en anglais. Vous devez TOUJOURS retourner un JSON valide, même en cas d'échec.
+    # Format prompt using prompt manager
+    formatted_prompt = prompt_manager.format_prompt(
+        name="detailed",  # Use the detailed prompt by default
+        context=context_text,
+        transcript=transcription,
+        date=date,
+        title=meeting_title
+    )
 
-    **Transcript de la réunion (incluant le contexte précédent)** :
-    {full_transcription}
-
-    **Instructions** :
-    - Extraire les informations suivantes et les structurer dans un objet JSON avec les clés en anglais.
-    - Si une information est manquante, utilisez les valeurs par défaut indiquées.
-    - Assurez-vous que toutes les dates sont au format JJ/MM/AAAA (par exemple, "15/05/2025").
-    - Les clés du JSON doivent être en anglais, mais les valeurs doivent refléter le texte original (en français).
-    - Retournez uniquement un JSON valide. Si vous échouez, retournez {{"error": "Impossible de traiter le transcript"}}.
-    - Ne produisez AUCUN texte en dehors du JSON, pas de commentaires ni d'explications.
-
-    **Informations à extraire** :
-
-    1. **presence_list** : Liste des présents et absents sous forme de chaîne (ex. "Présents: Alice, Bob\nAbsents: Charlie").
-       - **Présents** : Identifiez les participants mentionnés comme présents (mots-clés : "Présents", "Présent") ou ayant pris la parole (ex. "Alice a dit…").
-       - **Absents** : Recherchez les mentions explicites (mots-clés : "Absents", "Absent"). Sinon, indiquez "Absents: Non spécifié".
-       - Si aucune info, indiquez : "Présents: Non spécifié\nAbsents: Non spécifié".
-
-    2. **agenda_items** : Liste des points de l'ordre du jour sous forme de chaîne (ex. "I- Revue\nII- Résolutions").
-       - Recherchez "Ordre du jour" ou "Agenda".
-       - Sinon, déduisez à partir des sujets discutés.
-       - Par défaut : "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers".
-
-    3. **president** : Président de séance (mots-clés : "Président", "Présidente", "Prési").
-       - Par défaut : "Non spécifié".
-
-    4. **rapporteur** : Rapporteur (mots-clés : "Rapporteur", "Rapporteuse").
-       - Par défaut : "Non spécifié".
-
-    5. **start_time** et **end_time** : Heure de début et fin (format HHhMMmin, ex. "10h00min").
-       - Recherchez les mentions explicites de l'heure de fin (mots-clés : "fin", "terminée", "terminé", "ended").
-       - Si l'heure de fin n'est pas spécifiée, calculez-la en additionnant la durée de la réunion (mots-clés : "durée", "dure", "duré", "lasted") à l'heure de début.
-       - Par défaut : "Non spécifié".
-
-    6. **balance_amount** : Solde du compte (mots-clés : "solde", "compte", "balance").
-       - Par défaut : "Non spécifié".
-
-    7. **balance_date** : Date du solde (format JJ/MM/AAAA).
-       - Par défaut : {date}.
-
-    8. **activities_review** : Liste de dictionnaires pour la revue des activités.
-       - Recherchez les mentions sous "Revue des activités" ou "Activités de la semaine" dans le transcript.
-       - Clés : "actor", "dossier", "activities", "results", "perspectives".
-       - Par défaut : "actor": "Non spécifié", "dossier": "Non spécifié", "activities": "Non spécifié", "results": "Non spécifié", "perspectives": "Non spécifié".
-
-    9. **resolutions_summary** : Liste de dictionnaires pour les résolutions.
-       - Clés : "date" (JJ/MM/AAAA), "dossier", "resolution", "responsible", "deadline" (JJ/MM/AAAA), "execution_date" (JJ/MM/AAAA), "status", "report_count".
-       - Par défaut : "dossier": "Non spécifié", "responsible": "Non spécifié", "deadline": "Non spécifié", "execution_date": "", "status": "En cours", "report_count": "0".
-       - Recherchez les mentions sous "Résolution" ou "Resolutions".
-
-    10. **sanctions_summary** : Liste de dictionnaires pour les sanctions.
-        - Clés : "name", "reason", "amount", "date" (JJ/MM/AAAA), "status".
-        - Par défaut : "name": "Aucune", "reason": "Aucune sanction mentionnée", "amount": "0", "status": "Non appliquée".
-        - Recherchez les mentions sous "Sanction" ou "Amende" dans le transcript.
-        - Si aucune sanction n'est trouvée dans la partie principale du transcript, extrayez les sanctions de la section "**Contexte Précédent**" sous "RÉCAPITULATIF DES SANCTIONS".
-          - Les sanctions dans le contexte sont sous forme de tableau : NOM | RAISON | MONTANT (FCFA) | DATE | STATUT.
-          - Mappez : "name" (NOM), "reason" (RAISON), "amount" (MONTANT, sans "FCFA"), "date" (utilisez {date}), "status" (STATUT).
-          - Ignorez l'en-tête du tableau et extrayez les lignes de données.
-    """
     try:
         headers = {
             "Content-Type": "application/json",
@@ -472,7 +435,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         }
         payload = {
             "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": formatted_prompt}],
             "temperature": 0.1,
             "max_tokens": 5000
         }
@@ -483,35 +446,37 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         )
         if response.status_code != 200:
             st.error(f"Deepseek API error: Status {response.status_code}. Falling back.")
-            return extract_info_fallback(full_transcription, meeting_title, date, previous_context)
+            return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
         raw_response = response.json()["choices"][0]["message"]["content"].strip()
         cleaned_response = clean_json_response(raw_response)
-        if not  cleaned_response:
+        if not cleaned_response:
             st.error("Failed to clean JSON response. Falling back.")
-            return extract_info_fallback(full_transcription, meeting_title, date, previous_context)
+            return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
         extracted_data = json.loads(cleaned_response)
         if "error" in extracted_data:
             st.error(f"API error: {extracted_data['error']}. Falling back.")
-            return extract_info_fallback(full_transcription, meeting_title, date, previous_context)
-
-        # Use stored sanctions if none found and context_sanctions exists
-        if not extracted_data.get("sanctions_summary") and "context_sanctions" in st.session_state:
-            sanctions = st.session_state.context_sanctions
-            for sanction in sanctions:
-                sanction["date"] = date
-            extracted_data["sanctions_summary"] = sanctions
-            st.write(f"Using stored context_sanctions: {sanctions}")
+            return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
         # Add meeting metadata
         extracted_data["date"] = date
         extracted_data["meeting_title"] = meeting_title
+
+        # Store the meeting in vector store for future context
+        vector_store.add_meeting({
+            "transcript": transcription,
+            "date": date,
+            "title": meeting_title,
+            "extracted_info": extracted_data
+        })
+        vector_store.save(st.session_state.vector_store_dir)
+
         return extracted_data
 
     except Exception as e:
         st.error(f"Error extracting info: {e}. Falling back.")
-        return extract_info_fallback(full_transcription, meeting_title, date, previous_context)
+        return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
 def set_cell_background(cell, rgb_color):
     """Set the background color of a table cell."""
@@ -643,7 +608,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             present_attendees = [name.strip() for name in presence_list.split(",") if name.strip()] if presence_list != "Non spécifié" else []
 
         # Process agenda items
-        agenda_list = extracted_info.get("agenda_items", "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d’activités\nIV- Faits saillants\nV- Divers").split("\n")
+        agenda_list = extracted_info.get("agenda_items", "I- Relecture du compte rendu et adoption\nII- Récapitulatif des résolutions et sanctions\nIII- Revue d'activités\nIV- Faits saillants\nV- Divers").split("\n")
         agenda_list = [item.strip() for item in agenda_list if item.strip()]
 
         # Add header box
@@ -715,6 +680,22 @@ def main():
     st.sidebar.header("Configuration")
     st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
     st.session_state.deepseek_api_key = st.sidebar.text_input("Deepseek API Key", type="password")
+    
+    # Add prompt selection to sidebar
+    st.sidebar.header("Prompt Selection")
+    available_prompts = list(prompt_manager.prompts.keys())
+    selected_prompt = st.sidebar.selectbox(
+        "Select Prompt Template",
+        available_prompts,
+        format_func=lambda x: prompt_manager.prompts[x].description
+    )
+    
+    if st.sidebar.checkbox("Show Selected Prompt"):
+        st.sidebar.text_area(
+            "Prompt Template",
+            prompt_manager.get_prompt(selected_prompt).template,
+            height=300
+        )
     
     st.sidebar.header("Contexte Précédent")
     previous_report = st.sidebar.file_uploader("Télécharger le rapport précédent", type=["pdf", "png", "jpg", "jpeg"])
