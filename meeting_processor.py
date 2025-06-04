@@ -139,7 +139,8 @@ class MeetingProcessor:
         Meeting Note:
         {text}
 
-        Return a JSON object with exactly this structure (do not include any other text):
+        IMPORTANT: Your response must be ONLY the JSON object, with no additional text, markdown, or formatting.
+        Use this exact structure:
         {{
             "meeting_metadata": {{
                 "date": "{meeting_date}",
@@ -208,36 +209,51 @@ class MeetingProcessor:
             # Extract JSON from response
             content = response.json()["choices"][0]["message"]["content"].strip()
             
-            # Remove any markdown code block markers
-            content = content.replace("```json", "").replace("```", "").strip()
+            def clean_json_string(json_str: str) -> str:
+                """Helper function to clean and prepare JSON string"""
+                # Remove any markdown code block markers
+                json_str = re.sub(r'```(?:json)?\s*|\s*```', '', json_str)
+                
+                # Find the actual JSON content
+                json_match = re.search(r'({[\s\S]*})', json_str)
+                if not json_match:
+                    raise Exception("No valid JSON object found in response")
+                json_str = json_match.group(1)
+                
+                # Clean up common JSON formatting issues
+                json_str = json_str.replace('\n', ' ')  # Remove newlines
+                json_str = json_str.replace('\\', '')   # Remove escaped characters
+                json_str = ' '.join(json_str.split())   # Normalize whitespace
+                json_str = re.sub(r'([{,]\s*)(\w+)(\s*:)', r'\1"\2"\3', json_str)  # Add quotes to keys
+                json_str = json_str.replace("'", '"')   # Replace single quotes with double quotes
+                json_str = re.sub(r'"\s*,\s*}', '"}', json_str)  # Fix trailing commas
+                json_str = re.sub(r'}\s*,\s*]', '}]', json_str)  # Fix trailing commas in arrays
+                
+                return json_str
             
-            # Find the JSON object
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            
-            if json_start == -1 or json_end == 0:
-                raise Exception("No JSON found in response")
-            
-            json_str = content[json_start:json_end]
-            
-            # Clean up common JSON formatting issues
-            json_str = json_str.replace("\n", " ")  # Remove newlines
-            json_str = json_str.replace("\\", "")   # Remove escaped characters
-            json_str = " ".join(json_str.split())   # Normalize whitespace
-            
+            # First attempt with initial cleaning
             try:
+                json_str = clean_json_string(content)
                 extracted_data = json.loads(json_str)
             except json.JSONDecodeError as e:
-                # If JSON parsing fails, try to fix common issues
-                json_str = json_str.replace("'", '"')  # Replace single quotes with double quotes
-                json_str = re.sub(r'([{,]\s*)(\w+)(\s*:)', r'\1"\2"\3', json_str)  # Add quotes to keys
-                extracted_data = json.loads(json_str)
+                # Log the error and the problematic JSON
+                print(f"Initial JSON parsing failed: {str(e)}")
+                print(f"Problematic JSON:\n{json_str}")
+                
+                # Second attempt with more aggressive cleaning
+                try:
+                    # Remove any non-JSON content around the object
+                    json_str = re.sub(r'^[^{]*({[\s\S]*})[^}]*$', r'\1', json_str)
+                    # Fix common number formatting issues
+                    json_str = re.sub(r'(\d+)\.(\D)', r'\1\2', json_str)  # Remove trailing decimal points
+                    json_str = re.sub(r':\s*"(\d+)"', r': \1', json_str)  # Convert numeric strings to numbers
+                    extracted_data = json.loads(json_str)
+                except json.JSONDecodeError as e2:
+                    raise Exception(f"Failed to parse JSON after cleaning. Initial error: {str(e)}, Secondary error: {str(e2)}\nJSON string: {json_str}")
             
             # Validate the extracted data
             return self.validate_meeting_json(extracted_data)
             
-        except json.JSONDecodeError as e:
-            raise Exception(f"Invalid JSON format: {str(e)}\nJSON string: {json_str}")
         except Exception as e:
             raise Exception(f"Error extracting structured information: {str(e)}")
 
