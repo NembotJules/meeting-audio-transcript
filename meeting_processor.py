@@ -224,10 +224,27 @@ class MeetingProcessor:
                 json_str = json_str.replace('\n', ' ')  # Remove newlines
                 json_str = json_str.replace('\\', '')   # Remove escaped characters
                 json_str = ' '.join(json_str.split())   # Normalize whitespace
-                json_str = re.sub(r'([{,]\s*)(\w+)(\s*:)', r'\1"\2"\3', json_str)  # Add quotes to keys
-                json_str = json_str.replace("'", '"')   # Replace single quotes with double quotes
-                json_str = re.sub(r'"\s*,\s*}', '"}', json_str)  # Fix trailing commas
+                
+                # Fix quotes issues
+                json_str = json_str.replace('"', '"')   # Replace smart quotes
+                json_str = json_str.replace('"', '"')   # Replace smart quotes
+                json_str = json_str.replace("'", '"')   # Replace single quotes
+                json_str = json_str.replace("'", '"')   # Replace curly single quotes
+                
+                # Fix apostrophes in French text
+                json_str = json_str.replace("d'", "d'")  # Replace smart apostrophes
+                json_str = json_str.replace("l'", "l'")  # Replace smart apostrophes
+                
+                # Add quotes to keys
+                json_str = re.sub(r'([{,]\s*)(\w+)(\s*:)', r'\1"\2"\3', json_str)
+                
+                # Fix trailing commas
+                json_str = re.sub(r'"\s*,\s*}', '"}', json_str)  # Fix trailing commas in objects
                 json_str = re.sub(r'}\s*,\s*]', '}]', json_str)  # Fix trailing commas in arrays
+                
+                # Fix empty values
+                json_str = re.sub(r':\s*,', ': "",', json_str)  # Replace empty values with empty strings
+                json_str = re.sub(r':\s*}', ': ""}', json_str)  # Replace empty values at end of objects
                 
                 return json_str
             
