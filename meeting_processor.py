@@ -216,7 +216,7 @@ class MeetingProcessor:
                     json_str = re.sub(r'```(?:json)?\s*|\s*```', '', json_str)
                     
                     # Find the actual JSON content
-                    json_match = re.search(r'({[\s\S]*})', json_str)
+                    json_match = re.search(r'({[\s\S]*)', json_str)  # Modified to not require closing brace
                     if not json_match:
                         raise Exception("No valid JSON object found in response")
                     json_str = json_match.group(1)
@@ -255,13 +255,14 @@ class MeetingProcessor:
                         
                         return json_str
 
-                    def validate_json_structure(json_str):
-                        """Validate JSON structure and balance"""
+                    def validate_and_fix_json_structure(json_str):
+                        """Validate JSON structure and fix unclosed brackets"""
                         stack = []
                         in_string = False
                         escaped = False
+                        chars = list(json_str)  # Convert to list for easier modification
                         
-                        for i, char in enumerate(json_str):
+                        for i, char in enumerate(chars):
                             if char == '\\':
                                 escaped = not escaped
                                 continue
@@ -272,29 +273,31 @@ class MeetingProcessor:
                                 stack.append((char, i))
                             elif not in_string and char in '}]':
                                 if not stack:
-                                    raise Exception(f"Unmatched closing bracket at position {i}")
-                                opening, pos = stack.pop()
+                                    # Remove extra closing bracket
+                                    chars[i] = ''
+                                    continue
+                                opening, _ = stack.pop()
                                 if (opening == '{' and char != '}') or (opening == '[' and char != ']'):
-                                    raise Exception(f"Mismatched brackets: {opening} at {pos} and {char} at {i}")
+                                    # Fix mismatched bracket
+                                    chars[i] = '}' if opening == '{' else ']'
                             
                             escaped = False
                         
-                        if stack:
-                            raise Exception(f"Unclosed brackets: {[b[0] for b in stack]}")
+                        # Add missing closing brackets
+                        while stack:
+                            opening, _ = stack.pop()
+                            chars.append('}' if opening == '{' else ']')
                         
-                        return True
+                        return ''.join(chars)
 
-                    # Preprocess and validate JSON
+                    # Preprocess JSON
                     json_str = preprocess_json(json_str)
                     
+                    # Validate and fix JSON structure
+                    json_str = validate_and_fix_json_structure(json_str)
+                    
                     try:
-                        validate_json_structure(json_str)
-                    except Exception as e:
-                        print(f"JSON structure validation failed: {str(e)}")
-                        raise
-
-                    try:
-                        # Try parsing the preprocessed JSON
+                        # Try parsing the preprocessed and fixed JSON
                         data = json.loads(json_str)
                         
                         # If successful, clean the text values
