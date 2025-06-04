@@ -6,6 +6,7 @@ from mistralai import Mistral
 import requests
 from dataclasses import dataclass
 import tempfile
+import re
 
 @dataclass
 class MeetingSchema:
@@ -92,55 +93,53 @@ class MeetingProcessor:
             Structured meeting information as JSON
         """
         prompt = f"""
-        Extract structured information from this meeting note and format it as JSON.
+        You are a precise JSON extractor. Your task is to extract structured information from a meeting note and format it as valid JSON.
+        DO NOT include any explanations or additional text in your response, ONLY return the JSON object.
         
         Meeting Date: {meeting_date}
         Meeting Title: {meeting_title}
         
-        The meeting note follows this structure:
+        Extract the following information from the meeting note and structure it exactly as shown:
         
         1. Liste de présence:
-           - Identify all present members under "present"
-           - Identify all absent members under "absent"
+           - Present members -> attendance.present[]
+           - Absent members -> attendance.absent[]
         
-        2. Ordre du jour:
-           - List all agenda items in order
+        2. Ordre du jour -> agenda_items[]
         
         3. Revue d'activités (Table):
-           For each row, extract:
-           - Acteur (actor)
-           - Dossier (dossier)
-           - Activités (activities)
-           - Résultats (results)
-           - Perspectives (perspectives)
+           For each entry in activities_review[]:
+           - Acteur -> actor
+           - Dossier -> dossier
+           - Activités -> activities
+           - Résultats -> results
+           - Perspectives -> perspectives
         
         4. Récapitulatif des Résolutions (Table):
-           For each resolution, extract:
-           - Date
-           - Dossier
-           - Résolution
-           - Responsable
-           - Délai d'exécution (deadline)
-           - Statut
+           For each entry in resolutions_summary[]:
+           - Date -> date (DD/MM/YYYY)
+           - Dossier -> dossier
+           - Résolution -> resolution
+           - Responsable -> responsible
+           - Délai d'exécution -> deadline (DD/MM/YYYY)
+           - Statut -> status
         
-        5. Faits Saillants:
-           - List all key highlights
+        5. Faits Saillants -> key_highlights[]
         
-        6. Divers:
-           - List all miscellaneous points
+        6. Divers -> miscellaneous[]
         
         7. Récapitulatif des Sanctions (Table):
-           For each sanction, extract:
-           - Nom (name)
-           - Motif (reason)
-           - Montant (amount)
-           - Date
-           - Statut (status)
-        
-        Meeting Note Text:
+           For each entry in sanctions_summary[]:
+           - Nom -> name
+           - Motif -> reason
+           - Montant -> amount (number)
+           - Date -> date (DD/MM/YYYY)
+           - Statut -> status
+
+        Meeting Note:
         {text}
-        
-        Expected JSON structure:
+
+        Return a JSON object with exactly this structure (do not include any other text):
         {{
             "meeting_metadata": {{
                 "date": "{meeting_date}",
@@ -182,10 +181,6 @@ class MeetingProcessor:
                 }}
             ]
         }}
-        
-        Extract the information from the meeting note and format it according to this structure.
-        Ensure all dates are in DD/MM/YYYY format and the JSON is valid.
-        Return ONLY the JSON, no additional text.
         """
         
         try:
@@ -211,19 +206,38 @@ class MeetingProcessor:
                 raise Exception(f"API error: {response.status_code}")
             
             # Extract JSON from response
-            content = response.json()["choices"][0]["message"]["content"]
-            # Find JSON in content (it might be wrapped in ```json ```)
+            content = response.json()["choices"][0]["message"]["content"].strip()
+            
+            # Remove any markdown code block markers
+            content = content.replace("```json", "").replace("```", "").strip()
+            
+            # Find the JSON object
             json_start = content.find("{")
             json_end = content.rfind("}") + 1
+            
             if json_start == -1 or json_end == 0:
                 raise Exception("No JSON found in response")
             
             json_str = content[json_start:json_end]
-            extracted_data = json.loads(json_str)
+            
+            # Clean up common JSON formatting issues
+            json_str = json_str.replace("\n", " ")  # Remove newlines
+            json_str = json_str.replace("\\", "")   # Remove escaped characters
+            json_str = " ".join(json_str.split())   # Normalize whitespace
+            
+            try:
+                extracted_data = json.loads(json_str)
+            except json.JSONDecodeError as e:
+                # If JSON parsing fails, try to fix common issues
+                json_str = json_str.replace("'", '"')  # Replace single quotes with double quotes
+                json_str = re.sub(r'([{,]\s*)(\w+)(\s*:)', r'\1"\2"\3', json_str)  # Add quotes to keys
+                extracted_data = json.loads(json_str)
             
             # Validate the extracted data
             return self.validate_meeting_json(extracted_data)
             
+        except json.JSONDecodeError as e:
+            raise Exception(f"Invalid JSON format: {str(e)}\nJSON string: {json_str}")
         except Exception as e:
             raise Exception(f"Error extracting structured information: {str(e)}")
 
