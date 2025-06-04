@@ -220,33 +220,66 @@ class MeetingProcessor:
                     raise Exception("No valid JSON object found in response")
                 json_str = json_match.group(1)
                 
-                # Clean up common JSON formatting issues
-                json_str = json_str.replace('\n', ' ')  # Remove newlines
-                json_str = json_str.replace('\\', '')   # Remove escaped characters
-                json_str = ' '.join(json_str.split())   # Normalize whitespace
+                def replace_quotes_in_text(match):
+                    """Helper to replace quotes in text values while preserving structure"""
+                    text = match.group(1)
+                    # Replace curly quotes and apostrophes with straight ones
+                    text = text.replace('"', '"').replace('"', '"')
+                    text = text.replace("'", "'").replace("'", "'")
+                    text = text.replace("d'", "d'").replace("l'", "l'")
+                    return f'"{text}"'
                 
-                # Fix quotes issues
-                json_str = json_str.replace('"', '"')   # Replace smart quotes
-                json_str = json_str.replace('"', '"')   # Replace smart quotes
-                json_str = json_str.replace("'", '"')   # Replace single quotes
-                json_str = json_str.replace("'", '"')   # Replace curly single quotes
+                # Process the JSON string in chunks
+                def clean_chunk(chunk: str) -> str:
+                    # Clean up basic formatting
+                    chunk = chunk.replace('\n', ' ').replace('\\', '')
+                    chunk = ' '.join(chunk.split())  # Normalize whitespace
+                    
+                    # Replace quotes in text values while preserving JSON structure
+                    chunk = re.sub(r'"([^"]*)"', replace_quotes_in_text, chunk)
+                    
+                    # Fix empty values
+                    chunk = re.sub(r':\s*,', ': "",', chunk)
+                    chunk = re.sub(r':\s*}', ': ""}', chunk)
+                    
+                    return chunk
                 
-                # Fix apostrophes in French text
-                json_str = json_str.replace("d'", "d'")  # Replace smart apostrophes
-                json_str = json_str.replace("l'", "l'")  # Replace smart apostrophes
+                # Split the JSON string into manageable chunks
+                chunks = []
+                depth = 0
+                current_chunk = ""
                 
-                # Add quotes to keys
-                json_str = re.sub(r'([{,]\s*)(\w+)(\s*:)', r'\1"\2"\3', json_str)
+                for char in json_str:
+                    current_chunk += char
+                    if char == '{':
+                        depth += 1
+                    elif char == '}':
+                        depth -= 1
+                        if depth == 0:
+                            chunks.append(clean_chunk(current_chunk))
+                            current_chunk = ""
+                    elif char == ',' and depth == 1:
+                        chunks.append(clean_chunk(current_chunk))
+                        current_chunk = ""
                 
-                # Fix trailing commas
-                json_str = re.sub(r'"\s*,\s*}', '"}', json_str)  # Fix trailing commas in objects
-                json_str = re.sub(r'}\s*,\s*]', '}]', json_str)  # Fix trailing commas in arrays
+                if current_chunk:
+                    chunks.append(clean_chunk(current_chunk))
                 
-                # Fix empty values
-                json_str = re.sub(r':\s*,', ': "",', json_str)  # Replace empty values with empty strings
-                json_str = re.sub(r':\s*}', ': ""}', json_str)  # Replace empty values at end of objects
+                # Reassemble the cleaned chunks
+                cleaned_json = ''.join(chunks)
                 
-                return json_str
+                # Final cleanup
+                cleaned_json = re.sub(r'}\s*,\s*]', '}]', cleaned_json)  # Fix trailing commas in arrays
+                cleaned_json = re.sub(r'"\s*,\s*}', '"}', cleaned_json)  # Fix trailing commas in objects
+                
+                try:
+                    # Verify the JSON is valid
+                    json.loads(cleaned_json)
+                    return cleaned_json
+                except json.JSONDecodeError as e:
+                    print(f"JSON validation failed: {str(e)}")
+                    print(f"Problematic JSON:\n{cleaned_json}")
+                    raise
             
             # First attempt with initial cleaning
             try:
