@@ -220,66 +220,75 @@ class MeetingProcessor:
                     if not json_match:
                         raise Exception("No valid JSON object found in response")
                     json_str = json_match.group(1)
-                    
-                    def replace_quotes_in_text(match):
-                        """Helper to replace quotes in text values while preserving structure"""
-                        text = match.group(1)
-                        # Replace curly quotes and apostrophes with straight ones
+
+                    def clean_text_content(text):
+                        """Clean text content while preserving special characters"""
+                        # Replace smart quotes and apostrophes
                         text = text.replace('"', '"').replace('"', '"')
                         text = text.replace("'", "'").replace("'", "'")
+                        # Handle French contractions
                         text = text.replace("d'", "d'").replace("l'", "l'")
-                        return f'"{text}"'
-                    
-                    # Process the JSON string in chunks
-                    def clean_chunk(chunk: str) -> str:
-                        # Clean up basic formatting
-                        chunk = chunk.replace('\n', ' ').replace('\\', '')
-                        chunk = ' '.join(chunk.split())  # Normalize whitespace
+                        return text
+
+                    def process_json_recursively(data):
+                        """Process JSON structure recursively"""
+                        if isinstance(data, dict):
+                            return {k: process_json_recursively(v) for k, v in data.items()}
+                        elif isinstance(data, list):
+                            return [process_json_recursively(item) for item in data]
+                        elif isinstance(data, str):
+                            return clean_text_content(data)
+                        else:
+                            return data
+
+                    # First, try to parse the JSON as is
+                    try:
+                        data = json.loads(json_str)
+                        cleaned_data = process_json_recursively(data)
+                        return json.dumps(cleaned_data, ensure_ascii=False)
+                    except json.JSONDecodeError:
+                        # If direct parsing fails, try cleaning the string first
+                        # Basic cleanup
+                        json_str = json_str.replace('\n', ' ')
+                        json_str = ' '.join(json_str.split())
                         
-                        # Replace quotes in text values while preserving JSON structure
-                        chunk = re.sub(r'"([^"]*)"', replace_quotes_in_text, chunk)
+                        # Fix common JSON structural issues
+                        json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas in objects
+                        json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
+                        json_str = re.sub(r':\s*,', ': null,', json_str)  # Fix empty values
+                        json_str = re.sub(r':\s*}', ': null}', json_str)  # Fix empty values at end
                         
-                        # Fix empty values
-                        chunk = re.sub(r':\s*,', ': "",', chunk)
-                        chunk = re.sub(r':\s*}', ': ""}', chunk)
+                        # Fix unquoted keys
+                        json_str = re.sub(r'([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_str)
                         
-                        return chunk
-                    
-                    # Split the JSON string into manageable chunks
-                    chunks = []
-                    depth = 0
-                    current_chunk = ""
-                    
-                    for char in json_str:
-                        current_chunk += char
-                        if char == '{':
-                            depth += 1
-                        elif char == '}':
-                            depth -= 1
-                            if depth == 0:
-                                chunks.append(clean_chunk(current_chunk))
-                                current_chunk = ""
-                        elif char == ',' and depth == 1:
-                            chunks.append(clean_chunk(current_chunk))
-                            current_chunk = ""
-                    
-                    if current_chunk:
-                        chunks.append(clean_chunk(current_chunk))
-                    
-                    # Reassemble the cleaned chunks
-                    cleaned_json = ''.join(chunks)
-                    
-                    # Final cleanup
-                    cleaned_json = re.sub(r'}\s*,\s*]', '}]', cleaned_json)  # Fix trailing commas in arrays
-                    cleaned_json = re.sub(r'"\s*,\s*}', '"}', cleaned_json)  # Fix trailing commas in objects
-                    
-                    # Verify the JSON is valid
-                    json.loads(cleaned_json)
-                    return cleaned_json
-                    
+                        # Clean text values
+                        def replace_text_values(match):
+                            text = match.group(1)
+                            return f'"{clean_text_content(text)}"'
+                        
+                        json_str = re.sub(r'"([^"]*)"', replace_text_values, json_str)
+                        
+                        # Parse the cleaned JSON
+                        try:
+                            data = json.loads(json_str)
+                            cleaned_data = process_json_recursively(data)
+                            return json.dumps(cleaned_data, ensure_ascii=False)
+                        except json.JSONDecodeError as e:
+                            print(f"Failed to parse JSON after cleaning: {str(e)}")
+                            print(f"Position of error: {e.pos}")
+                            print(f"Line number: {e.lineno}")
+                            print(f"Column number: {e.colno}")
+                            context_start = max(0, e.pos - 50)
+                            context_end = min(len(json_str), e.pos + 50)
+                            print(f"Context around error:\n{json_str[context_start:context_end]}")
+                            raise
+
                 except Exception as e:
                     print(f"JSON cleaning failed: {str(e)}")
-                    print(f"Original JSON:\n{json_str}")
+                    if isinstance(e, json.JSONDecodeError):
+                        print(f"Error position: {e.pos}")
+                        print(f"Line number: {e.lineno}")
+                        print(f"Column number: {e.colno}")
                     raise Exception(f"Failed to clean JSON: {str(e)}")
             
             try:
