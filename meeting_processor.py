@@ -216,52 +216,27 @@ class MeetingProcessor:
                     json_str = re.sub(r'```(?:json)?\s*|\s*```', '', json_str)
                     
                     # Find the actual JSON content
-                    json_match = re.search(r'({[\s\S]*)', json_str)  # Modified to not require closing brace
+                    json_match = re.search(r'({[\s\S]*)', json_str)
                     if not json_match:
                         raise Exception("No valid JSON object found in response")
                     json_str = json_match.group(1)
 
                     def clean_text_content(text):
                         """Clean text content while preserving special characters"""
-                        # Replace smart quotes and apostrophes
-                        text = text.replace('"', '"').replace('"', '"')
+                        # First, escape any existing quotes
+                        text = text.replace('"', '\\"')
+                        
+                        # Handle French apostrophes and quotes
+                        text = text.replace('"', '\\"').replace('"', '\\"')
                         text = text.replace("'", "'").replace("'", "'")
-                        # Handle French contractions
-                        text = text.replace("d'", "d'").replace("l'", "l'")
+                        
+                        # Replace smart quotes with regular quotes
+                        text = text.replace('"', '\\"').replace('"', '\\"')
+                        
+                        # Handle French contractions - escape the apostrophes
+                        text = re.sub(r"(\w)'(\w)", r"\1\\'\2", text)
+                        
                         return text
-
-                    def fix_unterminated_strings(json_str):
-                        """Fix unterminated strings in JSON"""
-                        chars = list(json_str)
-                        in_string = False
-                        escaped = False
-                        string_start = -1
-                        
-                        # First pass: identify and fix unterminated strings
-                        for i, char in enumerate(chars):
-                            if char == '\\':
-                                escaped = not escaped
-                                continue
-                            
-                            if not escaped and char == '"':
-                                if not in_string:
-                                    in_string = True
-                                    string_start = i
-                                else:
-                                    in_string = False
-                            
-                            # If we hit a comma or closing bracket while in a string, close the string
-                            if in_string and not escaped and char in ',]}':
-                                chars.insert(i, '"')
-                                in_string = False
-                            
-                            escaped = False
-                        
-                        # If we're still in a string at the end, close it
-                        if in_string:
-                            chars.append('"')
-                        
-                        return ''.join(chars)
 
                     def preprocess_json(json_str):
                         """Preprocess JSON string to fix common issues"""
@@ -269,22 +244,29 @@ class MeetingProcessor:
                         json_str = json_str.replace('\n', ' ')
                         json_str = ' '.join(json_str.split())
                         
+                        # First, protect string content
+                        protected_strings = {}
+                        
+                        def protect_string(match):
+                            content = match.group(1)
+                            # Clean and protect the string content
+                            cleaned = clean_text_content(content)
+                            key = f"__STRING_{len(protected_strings)}__"
+                            protected_strings[key] = cleaned
+                            return f'"{key}"'
+                        
+                        # Protect string contents
+                        json_str = re.sub(r'"([^"]*)"', protect_string, json_str)
+                        
                         # Fix structural issues
                         json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)  # Remove trailing commas
                         json_str = re.sub(r':\s*,', ': null,', json_str)    # Fix empty values
                         json_str = re.sub(r':\s*}', ': null}', json_str)    # Fix empty values at end
                         json_str = re.sub(r':\s*]', ': null]', json_str)    # Fix empty values in arrays
                         
-                        # Fix quotes in text
-                        def fix_quotes(match):
-                            text = match.group(1)
-                            text = clean_text_content(text)
-                            # Escape any remaining quotes
-                            text = text.replace('"', '\\"')
-                            return f'"{text}"'
-                        
-                        # Process quoted strings
-                        json_str = re.sub(r'"([^"]*)"', fix_quotes, json_str)
+                        # Restore protected strings
+                        for key, value in protected_strings.items():
+                            json_str = json_str.replace(f'"{key}"', f'"{value}"')
                         
                         return json_str
 
@@ -294,25 +276,31 @@ class MeetingProcessor:
                         in_string = False
                         escaped = False
                         chars = list(json_str)
+                        i = 0
                         
-                        for i, char in enumerate(chars):
+                        while i < len(chars):
+                            char = chars[i]
+                            
                             if char == '\\':
                                 escaped = not escaped
+                                i += 1
                                 continue
                             
                             if not escaped and char == '"':
                                 in_string = not in_string
-                            elif not in_string and char in '{[':
-                                stack.append((char, i))
-                            elif not in_string and char in '}]':
-                                if not stack:
-                                    chars[i] = ''
-                                    continue
-                                opening, _ = stack.pop()
-                                if (opening == '{' and char != '}') or (opening == '[' and char != ']'):
-                                    chars[i] = '}' if opening == '{' else ']'
+                            elif not in_string:
+                                if char in '{[':
+                                    stack.append((char, i))
+                                elif char in '}]':
+                                    if not stack:
+                                        chars.pop(i)
+                                        continue
+                                    opening, _ = stack.pop()
+                                    if (opening == '{' and char != '}') or (opening == '[' and char != ']'):
+                                        chars[i] = '}' if opening == '{' else ']'
                             
                             escaped = False
+                            i += 1
                         
                         while stack:
                             opening, _ = stack.pop()
@@ -322,25 +310,12 @@ class MeetingProcessor:
 
                     # Process the JSON in stages
                     json_str = preprocess_json(json_str)
-                    json_str = fix_unterminated_strings(json_str)
                     json_str = validate_and_fix_json_structure(json_str)
                     
                     try:
                         # Try parsing the preprocessed and fixed JSON
                         data = json.loads(json_str)
-                        
-                        # If successful, clean the text values
-                        def clean_data_recursively(data):
-                            if isinstance(data, dict):
-                                return {k: clean_data_recursively(v) for k, v in data.items()}
-                            elif isinstance(data, list):
-                                return [clean_data_recursively(item) for item in data]
-                            elif isinstance(data, str):
-                                return clean_text_content(data)
-                            return data
-                        
-                        cleaned_data = clean_data_recursively(data)
-                        return json.dumps(cleaned_data, ensure_ascii=False)
+                        return json.dumps(data, ensure_ascii=False)
                         
                     except json.JSONDecodeError as e:
                         print("\nJSON Parsing Error Details:")
