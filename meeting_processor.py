@@ -230,61 +230,108 @@ class MeetingProcessor:
                         text = text.replace("d'", "d'").replace("l'", "l'")
                         return text
 
-                    def process_json_recursively(data):
-                        """Process JSON structure recursively"""
-                        if isinstance(data, dict):
-                            return {k: process_json_recursively(v) for k, v in data.items()}
-                        elif isinstance(data, list):
-                            return [process_json_recursively(item) for item in data]
-                        elif isinstance(data, str):
-                            return clean_text_content(data)
-                        else:
-                            return data
-
-                    # First, try to parse the JSON as is
-                    try:
-                        data = json.loads(json_str)
-                        cleaned_data = process_json_recursively(data)
-                        return json.dumps(cleaned_data, ensure_ascii=False)
-                    except json.JSONDecodeError:
-                        # If direct parsing fails, try cleaning the string first
+                    def preprocess_json(json_str):
+                        """Preprocess JSON string to fix common issues"""
                         # Basic cleanup
                         json_str = json_str.replace('\n', ' ')
                         json_str = ' '.join(json_str.split())
                         
-                        # Fix common JSON structural issues
-                        json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas in objects
-                        json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
-                        json_str = re.sub(r':\s*,', ': null,', json_str)  # Fix empty values
-                        json_str = re.sub(r':\s*}', ': null}', json_str)  # Fix empty values at end
+                        # Fix structural issues
+                        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)  # Remove trailing commas
+                        json_str = re.sub(r':\s*,', ': null,', json_str)    # Fix empty values
+                        json_str = re.sub(r':\s*}', ': null}', json_str)    # Fix empty values at end
+                        json_str = re.sub(r':\s*]', ': null]', json_str)    # Fix empty values in arrays
                         
-                        # Fix unquoted keys
-                        json_str = re.sub(r'([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_str)
-                        
-                        # Clean text values
-                        def replace_text_values(match):
+                        # Fix quotes in text
+                        def fix_quotes(match):
                             text = match.group(1)
-                            return f'"{clean_text_content(text)}"'
+                            text = clean_text_content(text)
+                            # Escape any remaining quotes
+                            text = text.replace('"', '\\"')
+                            return f'"{text}"'
                         
-                        json_str = re.sub(r'"([^"]*)"', replace_text_values, json_str)
+                        # Process quoted strings
+                        json_str = re.sub(r'"([^"]*)"', fix_quotes, json_str)
                         
-                        # Parse the cleaned JSON
-                        try:
-                            data = json.loads(json_str)
-                            cleaned_data = process_json_recursively(data)
-                            return json.dumps(cleaned_data, ensure_ascii=False)
-                        except json.JSONDecodeError as e:
-                            print(f"Failed to parse JSON after cleaning: {str(e)}")
-                            print(f"Position of error: {e.pos}")
-                            print(f"Line number: {e.lineno}")
-                            print(f"Column number: {e.colno}")
-                            context_start = max(0, e.pos - 50)
-                            context_end = min(len(json_str), e.pos + 50)
-                            print(f"Context around error:\n{json_str[context_start:context_end]}")
-                            raise
+                        return json_str
+
+                    def validate_json_structure(json_str):
+                        """Validate JSON structure and balance"""
+                        stack = []
+                        in_string = False
+                        escaped = False
+                        
+                        for i, char in enumerate(json_str):
+                            if char == '\\':
+                                escaped = not escaped
+                                continue
+                            
+                            if not escaped and char == '"':
+                                in_string = not in_string
+                            elif not in_string and char in '{[':
+                                stack.append((char, i))
+                            elif not in_string and char in '}]':
+                                if not stack:
+                                    raise Exception(f"Unmatched closing bracket at position {i}")
+                                opening, pos = stack.pop()
+                                if (opening == '{' and char != '}') or (opening == '[' and char != ']'):
+                                    raise Exception(f"Mismatched brackets: {opening} at {pos} and {char} at {i}")
+                            
+                            escaped = False
+                        
+                        if stack:
+                            raise Exception(f"Unclosed brackets: {[b[0] for b in stack]}")
+                        
+                        return True
+
+                    # Preprocess and validate JSON
+                    json_str = preprocess_json(json_str)
+                    
+                    try:
+                        validate_json_structure(json_str)
+                    except Exception as e:
+                        print(f"JSON structure validation failed: {str(e)}")
+                        raise
+
+                    try:
+                        # Try parsing the preprocessed JSON
+                        data = json.loads(json_str)
+                        
+                        # If successful, clean the text values
+                        def clean_data_recursively(data):
+                            if isinstance(data, dict):
+                                return {k: clean_data_recursively(v) for k, v in data.items()}
+                            elif isinstance(data, list):
+                                return [clean_data_recursively(item) for item in data]
+                            elif isinstance(data, str):
+                                return clean_text_content(data)
+                            return data
+                        
+                        cleaned_data = clean_data_recursively(data)
+                        return json.dumps(cleaned_data, ensure_ascii=False)
+                        
+                    except json.JSONDecodeError as e:
+                        print("\nJSON Parsing Error Details:")
+                        print(f"Error message: {str(e)}")
+                        print(f"Error position: {e.pos}")
+                        print(f"Line number: {e.lineno}")
+                        print(f"Column number: {e.colno}")
+                        
+                        # Show context around the error
+                        context_start = max(0, e.pos - 100)
+                        context_end = min(len(json_str), e.pos + 100)
+                        error_context = json_str[context_start:context_end]
+                        print("\nContext around error:")
+                        print("..." if context_start > 0 else "", end="")
+                        print(error_context, end="")
+                        print("..." if context_end < len(json_str) else "")
+                        print(" " * (min(100, e.pos - context_start)) + "^")  # Point to error location
+                        raise
 
                 except Exception as e:
-                    print(f"JSON cleaning failed: {str(e)}")
+                    print(f"\nJSON Processing Error:")
+                    print(f"Error type: {type(e).__name__}")
+                    print(f"Error message: {str(e)}")
                     if isinstance(e, json.JSONDecodeError):
                         print(f"Error position: {e.pos}")
                         print(f"Line number: {e.lineno}")
@@ -292,7 +339,7 @@ class MeetingProcessor:
                     raise Exception(f"Failed to clean JSON: {str(e)}")
             
             try:
-                # First attempt with initial cleaning
+                # Process the JSON
                 cleaned_json = clean_json_string(content)
                 extracted_data = json.loads(cleaned_json)
                 
