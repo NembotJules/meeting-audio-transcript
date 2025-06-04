@@ -223,18 +223,19 @@ class MeetingProcessor:
 
                     def clean_text_content(text):
                         """Clean text content while preserving special characters"""
-                        # First, escape any existing quotes
+                        # Replace any backslashes with double backslashes
+                        text = text.replace('\\', '\\\\')
+                        
+                        # Replace quotes with escaped quotes
                         text = text.replace('"', '\\"')
                         
-                        # Handle French apostrophes and quotes
-                        text = text.replace('"', '\\"').replace('"', '\\"')
+                        # Handle French apostrophes and quotes - replace with regular apostrophe
+                        text = text.replace('"', '"').replace('"', '"')
                         text = text.replace("'", "'").replace("'", "'")
+                        text = text.replace("'", "'")
                         
-                        # Replace smart quotes with regular quotes
-                        text = text.replace('"', '\\"').replace('"', '\\"')
-                        
-                        # Handle French contractions - escape the apostrophes
-                        text = re.sub(r"(\w)'(\w)", r"\1\\'\2", text)
+                        # Don't escape apostrophes in French words
+                        text = text.replace("\\'", "'")
                         
                         return text
 
@@ -246,12 +247,15 @@ class MeetingProcessor:
                         
                         # First, protect string content
                         protected_strings = {}
+                        string_counter = 0
                         
                         def protect_string(match):
+                            nonlocal string_counter
                             content = match.group(1)
                             # Clean and protect the string content
                             cleaned = clean_text_content(content)
-                            key = f"__STRING_{len(protected_strings)}__"
+                            key = f"__STRING_{string_counter}__"
+                            string_counter += 1
                             protected_strings[key] = cleaned
                             return f'"{key}"'
                         
@@ -333,6 +337,11 @@ class MeetingProcessor:
                         print(error_context, end="")
                         print("..." if context_end < len(json_str) else "")
                         print(" " * (min(200, e.pos - context_start)) + "^")  # Point to error location
+                        
+                        # Try to show the problematic string
+                        if "Invalid \\escape" in str(e):
+                            print("\nProblematic character sequence:")
+                            print(json_str[max(0, e.pos-5):min(len(json_str), e.pos+5)])
                         raise
 
                 except Exception as e:
