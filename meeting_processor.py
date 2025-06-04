@@ -230,6 +230,39 @@ class MeetingProcessor:
                         text = text.replace("d'", "d'").replace("l'", "l'")
                         return text
 
+                    def fix_unterminated_strings(json_str):
+                        """Fix unterminated strings in JSON"""
+                        chars = list(json_str)
+                        in_string = False
+                        escaped = False
+                        string_start = -1
+                        
+                        # First pass: identify and fix unterminated strings
+                        for i, char in enumerate(chars):
+                            if char == '\\':
+                                escaped = not escaped
+                                continue
+                            
+                            if not escaped and char == '"':
+                                if not in_string:
+                                    in_string = True
+                                    string_start = i
+                                else:
+                                    in_string = False
+                            
+                            # If we hit a comma or closing bracket while in a string, close the string
+                            if in_string and not escaped and char in ',]}':
+                                chars.insert(i, '"')
+                                in_string = False
+                            
+                            escaped = False
+                        
+                        # If we're still in a string at the end, close it
+                        if in_string:
+                            chars.append('"')
+                        
+                        return ''.join(chars)
+
                     def preprocess_json(json_str):
                         """Preprocess JSON string to fix common issues"""
                         # Basic cleanup
@@ -260,7 +293,7 @@ class MeetingProcessor:
                         stack = []
                         in_string = False
                         escaped = False
-                        chars = list(json_str)  # Convert to list for easier modification
+                        chars = list(json_str)
                         
                         for i, char in enumerate(chars):
                             if char == '\\':
@@ -273,27 +306,23 @@ class MeetingProcessor:
                                 stack.append((char, i))
                             elif not in_string and char in '}]':
                                 if not stack:
-                                    # Remove extra closing bracket
                                     chars[i] = ''
                                     continue
                                 opening, _ = stack.pop()
                                 if (opening == '{' and char != '}') or (opening == '[' and char != ']'):
-                                    # Fix mismatched bracket
                                     chars[i] = '}' if opening == '{' else ']'
                             
                             escaped = False
                         
-                        # Add missing closing brackets
                         while stack:
                             opening, _ = stack.pop()
                             chars.append('}' if opening == '{' else ']')
                         
                         return ''.join(chars)
 
-                    # Preprocess JSON
+                    # Process the JSON in stages
                     json_str = preprocess_json(json_str)
-                    
-                    # Validate and fix JSON structure
+                    json_str = fix_unterminated_strings(json_str)
                     json_str = validate_and_fix_json_structure(json_str)
                     
                     try:
@@ -320,15 +349,15 @@ class MeetingProcessor:
                         print(f"Line number: {e.lineno}")
                         print(f"Column number: {e.colno}")
                         
-                        # Show context around the error
-                        context_start = max(0, e.pos - 100)
-                        context_end = min(len(json_str), e.pos + 100)
+                        # Show more context around the error
+                        context_start = max(0, e.pos - 200)
+                        context_end = min(len(json_str), e.pos + 200)
                         error_context = json_str[context_start:context_end]
                         print("\nContext around error:")
                         print("..." if context_start > 0 else "", end="")
                         print(error_context, end="")
                         print("..." if context_end < len(json_str) else "")
-                        print(" " * (min(100, e.pos - context_start)) + "^")  # Point to error location
+                        print(" " * (min(200, e.pos - context_start)) + "^")  # Point to error location
                         raise
 
                 except Exception as e:
