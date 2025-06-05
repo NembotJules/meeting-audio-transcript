@@ -117,6 +117,24 @@ class MeetingProcessor:
         Returns:
             Structured meeting information as JSON
         """
+        def clean_json_structure(json_str: str) -> str:
+            """Clean up JSON structure issues like missing commas and invalid formatting."""
+            # Remove any whitespace between array/object elements that might interfere with our patterns
+            json_str = re.sub(r'\s+', ' ', json_str)
+            
+            # Fix missing commas between array elements
+            json_str = re.sub(r'}\s*{', '}, {', json_str)  # Between objects
+            json_str = re.sub(r']\s*{', '], {', json_str)  # Between array and object
+            json_str = re.sub(r'}\s*\[', '}, [', json_str)  # Between object and array
+            json_str = re.sub(r']\s*\[', '], [', json_str)  # Between arrays
+            
+            # Fix trailing/missing commas in arrays/objects
+            json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)  # Remove trailing commas
+            json_str = re.sub(r'{\s*}', '{}', json_str)  # Clean empty objects
+            json_str = re.sub(r'\[\s*]', '[]', json_str)  # Clean empty arrays
+            
+            return json_str
+
         def sanitize_for_json(text: str) -> tuple[str, dict]:
             """
             Sanitize text for JSON parsing by replacing problematic content with placeholders.
@@ -156,6 +174,9 @@ class MeetingProcessor:
                 text
             )
 
+            # Clean up JSON structure
+            sanitized = clean_json_structure(sanitized)
+
             return sanitized, replacements
 
         def restore_content(text: str, replacements: dict) -> str:
@@ -169,6 +190,9 @@ class MeetingProcessor:
                     restored = restored.replace(f'"{placeholder}"', f'"{escaped}"')
                 else:
                     restored = restored.replace(f'"{placeholder}"', f'"{original}"')
+            
+            # Final structure cleanup after content restoration
+            restored = clean_json_structure(restored)
             return restored
 
         prompt = f"""
@@ -179,6 +203,8 @@ class MeetingProcessor:
         3. Always enclose string values in double quotes
         4. Format numbers without quotes
         5. Return ONLY the JSON object, no other text
+        6. Always use commas between array elements
+        7. Never leave trailing commas
         
         Required structure:
         {{
