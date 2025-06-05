@@ -185,30 +185,6 @@ class MeetingProcessor:
         """
         
         try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.deepseek_api_key}"
-            }
-            
-            payload = {
-                "model": "deepseek-chat",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "max_tokens": 4000
-            }
-            
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers=headers,
-                json=payload
-            )
-            
-            if response.status_code != 200:
-                raise Exception(f"API error: {response.status_code}")
-            
-            # Extract JSON from response
-            content = response.json()["choices"][0]["message"]["content"].strip()
-            
             def clean_json_string(json_str: str) -> str:
                 """Helper function to clean and prepare JSON string"""
                 try:
@@ -222,20 +198,31 @@ class MeetingProcessor:
                     json_str = json_match.group(1)
 
                     def clean_text_content(text):
-                        """Clean text content while preserving special characters"""
-                        # Replace any backslashes with double backslashes
-                        text = text.replace('\\', '\\\\')
+                        """Clean text content while preserving special characters and French contractions"""
+                        # Create a list of common French contractions to protect
+                        french_contractions = [
+                            "d'", "l'", "n'", "s'", "qu'", "j'", "m'", "t'", "c'",
+                            "D'", "L'", "N'", "S'", "QU'", "J'", "M'", "T'", "C'"
+                        ]
                         
-                        # Replace quotes with escaped quotes
-                        text = text.replace('"', '\\"')
+                        # Replace contractions with placeholders temporarily
+                        contraction_placeholders = {}
+                        for i, contraction in enumerate(french_contractions):
+                            placeholder = f"__CONTR_{i}__"
+                            contraction_placeholders[contraction] = placeholder
+                            text = text.replace(contraction, placeholder)
                         
-                        # Handle French apostrophes and quotes - replace with regular apostrophe
-                        text = text.replace('"', '"').replace('"', '"')
+                        # Clean the text
+                        text = text.replace('\\', '\\\\')  # Escape backslashes
+                        text = text.replace('"', '\\"')    # Escape quotes
+                        
+                        # Handle French quotes and apostrophes
+                        text = text.replace('"', '\\"').replace('"', '\\"')
                         text = text.replace("'", "'").replace("'", "'")
-                        text = text.replace("'", "'")
                         
-                        # Don't escape apostrophes in French words
-                        text = text.replace("\\'", "'")
+                        # Restore contractions
+                        for contraction, placeholder in contraction_placeholders.items():
+                            text = text.replace(placeholder, contraction)
                         
                         return text
 
@@ -259,14 +246,19 @@ class MeetingProcessor:
                             protected_strings[key] = cleaned
                             return f'"{key}"'
                         
-                        # Protect string contents
-                        json_str = re.sub(r'"([^"]*)"', protect_string, json_str)
+                        # Enhanced string protection pattern
+                        string_pattern = r'"((?:[^"\\]|\\.)*)"'
+                        json_str = re.sub(string_pattern, protect_string, json_str)
                         
                         # Fix structural issues
                         json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)  # Remove trailing commas
                         json_str = re.sub(r':\s*,', ': null,', json_str)    # Fix empty values
                         json_str = re.sub(r':\s*}', ': null}', json_str)    # Fix empty values at end
                         json_str = re.sub(r':\s*]', ': null]', json_str)    # Fix empty values in arrays
+                        
+                        # Additional cleanup for potential French text issues
+                        json_str = re.sub(r'([^\\])"([^"]*?)\'([^"]*?)"', r'\1"\2\'\3"', json_str)  # Fix unescaped apostrophes
+                        json_str = re.sub(r'([^\\])\'([^\']*?)\'([^\']*?)\'', r'\1"\2\'\3"', json_str)  # Convert single quotes to double quotes
                         
                         # Restore protected strings
                         for key, value in protected_strings.items():
@@ -330,7 +322,7 @@ class MeetingProcessor:
                                 elif char in '}]':
                                     if stack:
                                         stack.pop()
-                            
+                        
                             escaped = False
                         
                         # Close any remaining open structures
@@ -415,7 +407,7 @@ class MeetingProcessor:
                             last_quote = json_str.rfind('"', 0, e.pos)
                             if last_quote >= 0:
                                 print(json_str[last_quote:min(len(json_str), last_quote + 50)])
-                        raise
+                        raise Exception(f"JSON parsing error: {str(e)}")
 
                 except Exception as e:
                     print(f"\nJSON Processing Error:")
@@ -426,8 +418,33 @@ class MeetingProcessor:
                         print(f"Line number: {e.lineno}")
                         print(f"Column number: {e.colno}")
                     raise Exception(f"Failed to clean JSON: {str(e)}")
-            
+
             try:
+                # Make API request
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.deepseek_api_key}"
+                }
+                
+                payload = {
+                    "model": "deepseek-chat",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                    "max_tokens": 4000
+                }
+                
+                response = requests.post(
+                    "https://api.deepseek.com/v1/chat/completions",
+                    headers=headers,
+                    json=payload
+                )
+                
+                if response.status_code != 200:
+                    raise Exception(f"API error: {response.status_code}")
+                
+                # Extract JSON from response
+                content = response.json()["choices"][0]["message"]["content"].strip()
+                
                 # Process the JSON
                 cleaned_json = clean_json_string(content)
                 extracted_data = json.loads(cleaned_json)
@@ -436,11 +453,23 @@ class MeetingProcessor:
                 return self.validate_meeting_json(extracted_data)
                 
             except Exception as e:
-                print(f"Error processing JSON: {str(e)}")
-                raise Exception(f"Error extracting structured information: {str(e)}")
-            
+                error_msg = str(e)
+                if "API error" in error_msg:
+                    print(f"API request error: {error_msg}")
+                    raise Exception(f"Failed to get response from API: {error_msg}")
+                else:
+                    print(f"Error processing JSON: {error_msg}")
+                    raise Exception(f"Error extracting structured information: {error_msg}")
+
         except Exception as e:
-            raise Exception(f"Error extracting structured information: {str(e)}")
+            print(f"\nJSON Processing Error:")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
+            if isinstance(e, json.JSONDecodeError):
+                print(f"Error position: {e.pos}")
+                print(f"Line number: {e.lineno}")
+                print(f"Column number: {e.colno}")
+            raise Exception(f"Failed to extract structured information: {str(e)}")
 
     def validate_meeting_json(self, data: Dict) -> Dict:
         """
@@ -531,26 +560,26 @@ class MeetingProcessor:
         except Exception as e:
             raise Exception(f"Error processing historical meeting: {str(e)}")
 
-def save_meeting_data(data: Dict, output_dir: str) -> str:
-    """
-    Save meeting data to JSON file.
-    
-    Args:
-        data: Meeting data
-        output_dir: Directory to save the file
+    def save_meeting_data(self, data: Dict, output_dir: str) -> str:
+        """
+        Save meeting data to JSON file.
         
-    Returns:
-        Path to saved file
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Create filename from meeting date and title
-    date = data["meeting_metadata"]["date"].replace("/", "-")
-    title = data["meeting_metadata"]["title"].replace(" ", "_")
-    filename = f"meeting_{date}_{title}.json"
-    filepath = os.path.join(output_dir, filename)
-    
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    
-    return filepath 
+        Args:
+            data: Meeting data
+            output_dir: Directory to save the file
+            
+        Returns:
+            Path to saved file
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create filename from meeting date and title
+        date = data["meeting_metadata"]["date"].replace("/", "-")
+        title = data["meeting_metadata"]["title"].replace(" ", "_")
+        filename = f"meeting_{date}_{title}.json"
+        filepath = os.path.join(output_dir, filename)
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        return filepath 
