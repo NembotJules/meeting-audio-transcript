@@ -117,6 +117,45 @@ class MeetingProcessor:
         Returns:
             Structured meeting information as JSON
         """
+        def sanitize_for_json(text: str) -> tuple[str, dict]:
+            """
+            Sanitize text for JSON parsing by replacing problematic content with placeholders.
+            Returns sanitized text and mapping to restore original content.
+            """
+            replacements = {}
+            counter = 0
+
+            def create_placeholder(match):
+                nonlocal counter
+                content = match.group(0)
+                placeholder = f"___PLACEHOLDER_{counter}___"
+                replacements[placeholder] = content
+                counter += 1
+                return placeholder
+
+            # Pattern to match text content that might contain French characters/apostrophes
+            patterns = [
+                # Match quoted strings with potential apostrophes/special chars
+                r'"[^"]*(?:\'[^"]*)*"',
+                # Match text between commas in JSON that might be problematic
+                r':\s*"[^"}{\]]*"',
+                # Match any remaining French contractions
+                r'\w+\'\w+',
+            ]
+
+            sanitized = text
+            for pattern in patterns:
+                sanitized = re.sub(pattern, create_placeholder, sanitized)
+
+            return sanitized, replacements
+
+        def restore_content(text: str, replacements: dict) -> str:
+            """Restore original content from placeholders."""
+            restored = text
+            for placeholder, original in replacements.items():
+                restored = restored.replace(placeholder, original)
+            return restored
+
         prompt = f"""
         You are a precise JSON extractor. Your task is to extract structured information from a meeting note and format it as valid JSON.
         DO NOT include any explanations or additional text in your response, ONLY return the JSON object.
@@ -160,366 +199,92 @@ class MeetingProcessor:
            - Montant -> amount (number)
            - Date -> date (DD/MM/YYYY)
            - Statut -> status
-
+        
         Meeting Note:
         {text}
-
-        IMPORTANT: Your response must be ONLY the JSON object, with no additional text, markdown, or formatting.
-        Use this exact structure:
-        {{
-            "meeting_metadata": {{
-                "date": "{meeting_date}",
-                "title": "{meeting_title}"
-            }},
-            "attendance": {{
-                "present": [],
-                "absent": []
-            }},
-            "agenda_items": [],
-            "activities_review": [
-                {{
-                    "actor": "",
-                    "dossier": "",
-                    "activities": "",
-                    "results": "",
-                    "perspectives": ""
-                }}
-            ],
-            "resolutions_summary": [
-                {{
-                    "date": "",
-                    "dossier": "",
-                    "resolution": "",
-                    "responsible": "",
-                    "deadline": "",
-                    "status": ""
-                }}
-            ],
-            "key_highlights": [],
-            "miscellaneous": [],
-            "sanctions_summary": [
-                {{
-                    "name": "",
-                    "reason": "",
-                    "amount": 0,
-                    "date": "",
-                    "status": ""
-                }}
-            ]
-        }}
         """
         
         try:
-            def clean_json_string(json_str: str) -> str:
-                """Helper function to clean and prepare JSON string"""
-                try:
-                    # Remove any markdown code block markers
-                    json_str = re.sub(r'```(?:json)?\s*|\s*```', '', json_str)
-                    
-                    # Find the actual JSON content
-                    json_match = re.search(r'({[\s\S]*)', json_str)
-                    if not json_match:
-                        raise Exception("No valid JSON object found in response")
-                    json_str = json_match.group(1)
-
-                    def clean_text_content(text):
-                        """Clean text content while preserving special characters and French contractions"""
-                        # Create a list of common French contractions and words with apostrophes
-                        french_patterns = [
-                            # Common contractions
-                            "d'", "l'", "n'", "s'", "qu'", "j'", "m'", "t'", "c'", "jusqu'", "presqu'",
-                            "D'", "L'", "N'", "S'", "QU'", "J'", "M'", "T'", "C'", "JUSQU'", "PRESQU'",
-                            # Common words with apostrophes
-                            "aujourd'hui", "d'abord", "d'accord", "d'ailleurs", "d'après",
-                            "d'activité", "d'analyse", "d'assistance", "d'échange", "d'exécution",
-                            "d'information", "d'observation", "d'un", "d'une", "d'être",
-                            # Add more patterns as needed
-                        ]
-                        
-                        # Sort patterns by length (longest first) to avoid partial replacements
-                        french_patterns.sort(key=len, reverse=True)
-                        
-                        # Replace contractions with placeholders temporarily
-                        contraction_placeholders = {}
-                        for i, pattern in enumerate(french_patterns):
-                            placeholder = f"__CONTR_{i}__"
-                            contraction_placeholders[pattern] = placeholder
-                            # Use word boundary for more precise replacement
-                            text = re.sub(rf'\b{re.escape(pattern)}\b', placeholder, text)
-                        
-                        # Handle any remaining apostrophes that might be part of contractions
-                        # This catches dynamic contractions not in our list
-                        def protect_remaining_contractions(match):
-                            contraction = match.group(0)
-                            if contraction not in contraction_placeholders:
-                                placeholder = f"__CONTR_{len(contraction_placeholders)}__"
-                                contraction_placeholders[contraction] = placeholder
-                                return placeholder
-                            return contraction
-                        
-                        # Find remaining word + apostrophe + word patterns
-                        text = re.sub(r'\b\w+\'\w+\b', protect_remaining_contractions, text)
-                        
-                        # Clean the text
-                        text = text.replace('\\', '\\\\')  # Escape backslashes
-                        text = text.replace('"', '\\"')    # Escape quotes
-                        
-                        # Handle French quotes and apostrophes
-                        text = text.replace('"', '\\"').replace('"', '\\"')
-                        text = text.replace("'", "'").replace("'", "'")
-                        
-                        # Restore contractions
-                        for contraction, placeholder in contraction_placeholders.items():
-                            text = text.replace(placeholder, contraction)
-                        
-                        return text
-
-                    def preprocess_json(json_str):
-                        """Preprocess JSON string to fix common issues"""
-                        # Basic cleanup
-                        json_str = json_str.replace('\n', ' ')
-                        json_str = ' '.join(json_str.split())
-                        
-                        # First, protect string content
-                        protected_strings = {}
-                        string_counter = 0
-                        
-                        def protect_string(match):
-                            nonlocal string_counter
-                            content = match.group(1)
-                            # Clean and protect the string content
-                            cleaned = clean_text_content(content)
-                            key = f"__STRING_{string_counter}__"
-                            string_counter += 1
-                            protected_strings[key] = cleaned
-                            return f'"{key}"'
-                        
-                        # Enhanced string protection pattern that handles escaped quotes
-                        string_pattern = r'"((?:[^"\\]|\\.|\\u[0-9a-fA-F]{4})*)"'
-                        json_str = re.sub(string_pattern, protect_string, json_str)
-                        
-                        # Fix structural issues
-                        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)  # Remove trailing commas
-                        json_str = re.sub(r':\s*,', ': null,', json_str)    # Fix empty values
-                        json_str = re.sub(r':\s*}', ': null}', json_str)    # Fix empty values at end
-                        json_str = re.sub(r':\s*]', ': null]', json_str)    # Fix empty values in arrays
-                        
-                        # Additional cleanup for potential French text issues
-                        json_str = re.sub(r'([^\\])"([^"]*?)\'([^"]*?)"', r'\1"\2\'\3"', json_str)  # Fix unescaped apostrophes
-                        json_str = re.sub(r'([^\\])\'([^\']*?)\'([^\']*?)\'', r'\1"\2\'\3"', json_str)  # Convert single quotes to double quotes
-                        
-                        # Handle any remaining problematic patterns
-                        json_str = re.sub(r'(?<=\w)\'(?=\w)', "'", json_str)  # Normalize mid-word apostrophes
-                        
-                        # Restore protected strings
-                        for key, value in protected_strings.items():
-                            json_str = json_str.replace(f'"{key}"', f'"{value}"')
-                        
-                        return json_str
-
-                    def fix_truncated_strings(json_str):
-                        """Fix truncated or unterminated strings"""
-                        chars = list(json_str)
-                        in_string = False
-                        escaped = False
-                        last_quote_pos = -1
-                        i = 0
-                        
-                        while i < len(chars):
-                            char = chars[i]
-                            
-                            if char == '\\':
-                                escaped = not escaped
-                                i += 1
-                                continue
-                            
-                            if not escaped and char == '"':
-                                if not in_string:
-                                    in_string = True
-                                    last_quote_pos = i
-                                else:
-                                    in_string = False
-                            elif in_string and not escaped and char in '{[]},:':
-                                # Found JSON structural character inside unclosed string
-                                # Insert closing quote before it
-                                chars.insert(i, '"')
-                                in_string = False
-                                i += 1
-                            
-                            escaped = False
-                            i += 1
-                        
-                        # If still in string at end, close it
-                        if in_string:
-                            chars.append('"')
-                        
-                        result = ''.join(chars)
-                        
-                        # Fix any truncated objects/arrays
-                        stack = []
-                        in_string = False
-                        escaped = False
-                        
-                        for char in result:
-                            if char == '\\':
-                                escaped = not escaped
-                                continue
-                            
-                            if not escaped and char == '"':
-                                in_string = not in_string
-                            elif not in_string:
-                                if char in '{[':
-                                    stack.append(char)
-                                elif char in '}]':
-                                    if stack:
-                                        stack.pop()
-                        
-                            escaped = False
-                        
-                        # Close any remaining open structures
-                        while stack:
-                            char = stack.pop()
-                            result += '}' if char == '{' else ']'
-                        
-                        return result
-
-                    def validate_and_fix_json_structure(json_str):
-                        """Validate JSON structure and fix unclosed brackets"""
-                        stack = []
-                        in_string = False
-                        escaped = False
-                        chars = list(json_str)
-                        i = 0
-                        
-                        while i < len(chars):
-                            char = chars[i]
-                            
-                            if char == '\\':
-                                escaped = not escaped
-                                i += 1
-                                continue
-                            
-                            if not escaped and char == '"':
-                                in_string = not in_string
-                            elif not in_string:
-                                if char in '{[':
-                                    stack.append((char, i))
-                                elif char in '}]':
-                                    if not stack:
-                                        chars.pop(i)
-                                        continue
-                                    opening, _ = stack.pop()
-                                    if (opening == '{' and char != '}') or (opening == '[' and char != ']'):
-                                        chars[i] = '}' if opening == '{' else ']'
-                            
-                            escaped = False
-                            i += 1
-                        
-                        while stack:
-                            opening, _ = stack.pop()
-                            chars.append('}' if opening == '{' else ']')
-                        
-                        return ''.join(chars)
-
-                    # Process the JSON in stages
-                    json_str = preprocess_json(json_str)
-                    json_str = fix_truncated_strings(json_str)
-                    json_str = validate_and_fix_json_structure(json_str)
-                    
-                    try:
-                        # Try parsing the preprocessed and fixed JSON
-                        data = json.loads(json_str)
-                        return json.dumps(data, ensure_ascii=False)
-                        
-                    except json.JSONDecodeError as e:
-                        print("\nJSON Parsing Error Details:")
-                        print(f"Error message: {str(e)}")
-                        print(f"Error position: {e.pos}")
-                        print(f"Line number: {e.lineno}")
-                        print(f"Column number: {e.colno}")
-                        
-                        # Show more context around the error
-                        context_start = max(0, e.pos - 200)
-                        context_end = min(len(json_str), e.pos + 200)
-                        error_context = json_str[context_start:context_end]
-                        print("\nContext around error:")
-                        print("..." if context_start > 0 else "", end="")
-                        print(error_context, end="")
-                        print("..." if context_end < len(json_str) else "")
-                        print(" " * (min(200, e.pos - context_start)) + "^")  # Point to error location
-                        
-                        # Try to show the problematic string
-                        if "Invalid \\escape" in str(e):
-                            print("\nProblematic character sequence:")
-                            print(json_str[max(0, e.pos-5):min(len(json_str), e.pos+5)])
-                        elif "Unterminated string" in str(e):
-                            print("\nUnterminated string context:")
-                            # Find the last quote before the error
-                            last_quote = json_str.rfind('"', 0, e.pos)
-                            if last_quote >= 0:
-                                print(json_str[last_quote:min(len(json_str), last_quote + 50)])
-                        raise Exception(f"JSON parsing error: {str(e)}")
-
-                except Exception as e:
-                    print(f"\nJSON Processing Error:")
-                    print(f"Error type: {type(e).__name__}")
-                    print(f"Error message: {str(e)}")
-                    if isinstance(e, json.JSONDecodeError):
-                        print(f"Error position: {e.pos}")
-                        print(f"Line number: {e.lineno}")
-                        print(f"Column number: {e.colno}")
-                    raise Exception(f"Failed to clean JSON: {str(e)}")
-
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.deepseek_api_key}"
+            }
+            
+            payload = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 4000
+            }
+            
+            response = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers=headers,
+                json=payload
+            )
+            
+            if response.status_code != 200:
+                raise Exception(f"API error: {response.status_code}")
+            
+            # Extract JSON from response
+            content = response.json()["choices"][0]["message"]["content"].strip()
+            
+            # Remove any markdown code block markers
+            content = re.sub(r'```(?:json)?\s*|\s*```', '', content)
+            
+            # Find the actual JSON content
+            json_match = re.search(r'({[\s\S]*})', content)
+            if not json_match:
+                raise Exception("No valid JSON object found in response")
+            content = json_match.group(1)
+            
+            # First pass: Sanitize the content
+            sanitized_content, replacements = sanitize_for_json(content)
+            
             try:
-                # Make API request
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.deepseek_api_key}"
+                # Parse the sanitized JSON
+                parsed_data = json.loads(sanitized_content)
+                
+                # Convert back to string with proper formatting
+                formatted_json = json.dumps(parsed_data, ensure_ascii=False, indent=2)
+                
+                # Restore the original content
+                restored_json = restore_content(formatted_json, replacements)
+                
+                # Final parse to ensure validity
+                extracted_data = json.loads(restored_json)
+                
+                # Add meeting metadata
+                extracted_data["meeting_metadata"] = {
+                    "date": meeting_date,
+                    "title": meeting_title
                 }
-                
-                payload = {
-                    "model": "deepseek-chat",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1,
-                    "max_tokens": 4000
-                }
-                
-                response = requests.post(
-                    "https://api.deepseek.com/v1/chat/completions",
-                    headers=headers,
-                    json=payload
-                )
-                
-                if response.status_code != 200:
-                    raise Exception(f"API error: {response.status_code}")
-                
-                # Extract JSON from response
-                content = response.json()["choices"][0]["message"]["content"].strip()
-                
-                # Process the JSON
-                cleaned_json = clean_json_string(content)
-                extracted_data = json.loads(cleaned_json)
                 
                 # Validate the extracted data
                 return self.validate_meeting_json(extracted_data)
                 
-            except Exception as e:
-                error_msg = str(e)
-                if "API error" in error_msg:
-                    print(f"API request error: {error_msg}")
-                    raise Exception(f"Failed to get response from API: {error_msg}")
-                else:
-                    print(f"Error processing JSON: {error_msg}")
-                    raise Exception(f"Error extracting structured information: {error_msg}")
-
-        except Exception as e:
-            print(f"\nJSON Processing Error:")
-            print(f"Error type: {type(e).__name__}")
-            print(f"Error message: {str(e)}")
-            if isinstance(e, json.JSONDecodeError):
+            except json.JSONDecodeError as e:
+                print(f"\nJSON Parsing Error Details:")
+                print(f"Error message: {str(e)}")
                 print(f"Error position: {e.pos}")
                 print(f"Line number: {e.lineno}")
                 print(f"Column number: {e.colno}")
+                
+                # Show context around the error
+                context_start = max(0, e.pos - 200)
+                context_end = min(len(sanitized_content), e.pos + 200)
+                error_context = sanitized_content[context_start:context_end]
+                print("\nContext around error:")
+                print("..." if context_start > 0 else "", end="")
+                print(error_context, end="")
+                print("..." if context_end < len(sanitized_content) else "")
+                print(" " * (min(200, e.pos - context_start)) + "^")
+                raise Exception(f"JSON parsing error: {str(e)}")
+                
+        except Exception as e:
+            print(f"\nProcessing Error:")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
             raise Exception(f"Failed to extract structured information: {str(e)}")
 
     def validate_meeting_json(self, data: Dict) -> Dict:
