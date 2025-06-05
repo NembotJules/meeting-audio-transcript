@@ -274,6 +274,72 @@ class MeetingProcessor:
                         
                         return json_str
 
+                    def fix_truncated_strings(json_str):
+                        """Fix truncated or unterminated strings"""
+                        chars = list(json_str)
+                        in_string = False
+                        escaped = False
+                        last_quote_pos = -1
+                        i = 0
+                        
+                        while i < len(chars):
+                            char = chars[i]
+                            
+                            if char == '\\':
+                                escaped = not escaped
+                                i += 1
+                                continue
+                            
+                            if not escaped and char == '"':
+                                if not in_string:
+                                    in_string = True
+                                    last_quote_pos = i
+                                else:
+                                    in_string = False
+                            elif in_string and not escaped and char in '{[]},:':
+                                # Found JSON structural character inside unclosed string
+                                # Insert closing quote before it
+                                chars.insert(i, '"')
+                                in_string = False
+                                i += 1
+                            
+                            escaped = False
+                            i += 1
+                        
+                        # If still in string at end, close it
+                        if in_string:
+                            chars.append('"')
+                        
+                        result = ''.join(chars)
+                        
+                        # Fix any truncated objects/arrays
+                        stack = []
+                        in_string = False
+                        escaped = False
+                        
+                        for char in result:
+                            if char == '\\':
+                                escaped = not escaped
+                                continue
+                            
+                            if not escaped and char == '"':
+                                in_string = not in_string
+                            elif not in_string:
+                                if char in '{[':
+                                    stack.append(char)
+                                elif char in '}]':
+                                    if stack:
+                                        stack.pop()
+                            
+                            escaped = False
+                        
+                        # Close any remaining open structures
+                        while stack:
+                            char = stack.pop()
+                            result += '}' if char == '{' else ']'
+                        
+                        return result
+
                     def validate_and_fix_json_structure(json_str):
                         """Validate JSON structure and fix unclosed brackets"""
                         stack = []
@@ -314,6 +380,7 @@ class MeetingProcessor:
 
                     # Process the JSON in stages
                     json_str = preprocess_json(json_str)
+                    json_str = fix_truncated_strings(json_str)
                     json_str = validate_and_fix_json_structure(json_str)
                     
                     try:
@@ -342,6 +409,12 @@ class MeetingProcessor:
                         if "Invalid \\escape" in str(e):
                             print("\nProblematic character sequence:")
                             print(json_str[max(0, e.pos-5):min(len(json_str), e.pos+5)])
+                        elif "Unterminated string" in str(e):
+                            print("\nUnterminated string context:")
+                            # Find the last quote before the error
+                            last_quote = json_str.rfind('"', 0, e.pos)
+                            if last_quote >= 0:
+                                print(json_str[last_quote:min(len(json_str), last_quote + 50)])
                         raise
 
                 except Exception as e:
