@@ -128,24 +128,33 @@ class MeetingProcessor:
             def create_placeholder(match):
                 nonlocal counter
                 content = match.group(0)
+                # Don't replace if it's a known JSON key
+                known_keys = {
+                    '"meeting_metadata"', '"date"', '"title"',
+                    '"attendance"', '"present"', '"absent"',
+                    '"agenda_items"', '"activities_review"',
+                    '"actor"', '"dossier"', '"activities"',
+                    '"results"', '"perspectives"',
+                    '"resolutions_summary"', '"resolution"',
+                    '"responsible"', '"deadline"', '"status"',
+                    '"key_highlights"', '"miscellaneous"',
+                    '"sanctions_summary"', '"name"', '"reason"',
+                    '"amount"', '"execution_date"', '"report_count"'
+                }
+                if content in known_keys:
+                    return content
+                
                 placeholder = f"___PLACEHOLDER_{counter}___"
-                replacements[placeholder] = content
+                replacements[placeholder] = content.strip('"')  # Remove quotes as they'll be added back
                 counter += 1
-                return placeholder
+                return f'"{placeholder}"'  # Keep JSON string format
 
-            # Pattern to match text content that might contain French characters/apostrophes
-            patterns = [
-                # Match quoted strings with potential apostrophes/special chars
-                r'"[^"]*(?:\'[^"]*)*"',
-                # Match text between commas in JSON that might be problematic
-                r':\s*"[^"}{\]]*"',
-                # Match any remaining French contractions
-                r'\w+\'\w+',
-            ]
-
-            sanitized = text
-            for pattern in patterns:
-                sanitized = re.sub(pattern, create_placeholder, sanitized)
+            # First pass: Protect all string values
+            sanitized = re.sub(
+                r'"([^"\\]*(?:\\.[^"\\]*)*)"',  # Match quoted strings
+                create_placeholder,
+                text
+            )
 
             return sanitized, replacements
 
@@ -153,53 +162,67 @@ class MeetingProcessor:
             """Restore original content from placeholders."""
             restored = text
             for placeholder, original in replacements.items():
-                restored = restored.replace(placeholder, original)
+                # Properly handle quotes in the replacement
+                if '"' in original or "'" in original:
+                    # Escape any quotes in the original content
+                    escaped = original.replace('"', '\\"')
+                    restored = restored.replace(f'"{placeholder}"', f'"{escaped}"')
+                else:
+                    restored = restored.replace(f'"{placeholder}"', f'"{original}"')
             return restored
 
         prompt = f"""
-        You are a precise JSON extractor. Your task is to extract structured information from a meeting note and format it as valid JSON.
-        DO NOT include any explanations or additional text in your response, ONLY return the JSON object.
+        You are a precise JSON extractor. Extract structured information from the meeting note and format it as valid JSON.
+        Follow these rules strictly:
+        1. Use ONLY the specified property names
+        2. Always enclose property names in double quotes
+        3. Always enclose string values in double quotes
+        4. Format numbers without quotes
+        5. Return ONLY the JSON object, no other text
         
-        Meeting Date: {meeting_date}
-        Meeting Title: {meeting_title}
-        
-        Extract the following information from the meeting note and structure it exactly as shown:
-        
-        1. Liste de présence:
-           - Present members -> attendance.present[]
-           - Absent members -> attendance.absent[]
-        
-        2. Ordre du jour -> agenda_items[]
-        
-        3. Revue d'activités (Table):
-           For each entry in activities_review[]:
-           - Acteur -> actor
-           - Dossier -> dossier
-           - Activités -> activities
-           - Résultats -> results
-           - Perspectives -> perspectives
-        
-        4. Récapitulatif des Résolutions (Table):
-           For each entry in resolutions_summary[]:
-           - Date -> date (DD/MM/YYYY)
-           - Dossier -> dossier
-           - Résolution -> resolution
-           - Responsable -> responsible
-           - Délai d'exécution -> deadline (DD/MM/YYYY)
-           - Statut -> status
-        
-        5. Faits Saillants -> key_highlights[]
-        
-        6. Divers -> miscellaneous[]
-        
-        7. Récapitulatif des Sanctions (Table):
-           For each entry in sanctions_summary[]:
-           - Nom -> name
-           - Motif -> reason
-           - Montant -> amount (number)
-           - Date -> date (DD/MM/YYYY)
-           - Statut -> status
-        
+        Required structure:
+        {{
+            "meeting_metadata": {{
+                "date": "{meeting_date}",
+                "title": "{meeting_title}"
+            }},
+            "attendance": {{
+                "present": [],
+                "absent": []
+            }},
+            "agenda_items": [],
+            "activities_review": [
+                {{
+                    "actor": "",
+                    "dossier": "",
+                    "activities": "",
+                    "results": "",
+                    "perspectives": ""
+                }}
+            ],
+            "resolutions_summary": [
+                {{
+                    "date": "",
+                    "dossier": "",
+                    "resolution": "",
+                    "responsible": "",
+                    "deadline": "",
+                    "status": ""
+                }}
+            ],
+            "key_highlights": [],
+            "miscellaneous": [],
+            "sanctions_summary": [
+                {{
+                    "name": "",
+                    "reason": "",
+                    "amount": 0,
+                    "date": "",
+                    "status": ""
+                }}
+            ]
+        }}
+
         Meeting Note:
         {text}
         """
