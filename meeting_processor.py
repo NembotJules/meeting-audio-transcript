@@ -1,3 +1,4 @@
+"""Module for processing meeting transcripts and extracting structured information."""
 from typing import Dict, List, Optional, Union
 import json
 from datetime import datetime
@@ -19,6 +20,30 @@ class MeetingSchema:
     key_highlights: List[str]
     miscellaneous: List[str]
     sanctions_summary: List[Dict[str, str]]  # name, reason, amount, date, status
+
+def save_meeting_data(data: Dict, output_dir: str) -> str:
+    """
+    Save meeting data to JSON file.
+    
+    Args:
+        data: Meeting data
+        output_dir: Directory to save the file
+        
+    Returns:
+        Path to saved file
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Create filename from meeting date and title
+    date = data["meeting_metadata"]["date"].replace("/", "-")
+    title = data["meeting_metadata"]["title"].replace(" ", "_")
+    filename = f"meeting_{date}_{title}.json"
+    filepath = os.path.join(output_dir, filename)
+    
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    return filepath
 
 class MeetingProcessor:
     def __init__(self, mistral_api_key: str, deepseek_api_key: str):
@@ -558,28 +583,4 @@ class MeetingProcessor:
             return structured_data
             
         except Exception as e:
-            raise Exception(f"Error processing historical meeting: {str(e)}")
-
-    def save_meeting_data(self, data: Dict, output_dir: str) -> str:
-        """
-        Save meeting data to JSON file.
-        
-        Args:
-            data: Meeting data
-            output_dir: Directory to save the file
-            
-        Returns:
-            Path to saved file
-        """
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Create filename from meeting date and title
-        date = data["meeting_metadata"]["date"].replace("/", "-")
-        title = data["meeting_metadata"]["title"].replace(" ", "_")
-        filename = f"meeting_{date}_{title}.json"
-        filepath = os.path.join(output_dir, filename)
-        
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        return filepath 
+            raise Exception(f"Error processing historical meeting: {str(e)}") 
