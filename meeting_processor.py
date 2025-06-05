@@ -117,23 +117,89 @@ class MeetingProcessor:
         Returns:
             Structured meeting information as JSON
         """
-        def clean_json_structure(json_str: str) -> str:
-            """Clean up JSON structure issues like missing commas and invalid formatting."""
-            # Remove any whitespace between array/object elements that might interfere with our patterns
-            json_str = re.sub(r'\s+', ' ', json_str)
+        def format_json_structure(json_str: str) -> str:
+            """Format and fix JSON structure using a token-based approach."""
+            tokens = []
+            in_string = False
+            escape_next = False
+            current_token = []
             
-            # Fix missing commas between array elements
-            json_str = re.sub(r'}\s*{', '}, {', json_str)  # Between objects
-            json_str = re.sub(r']\s*{', '], {', json_str)  # Between array and object
-            json_str = re.sub(r'}\s*\[', '}, [', json_str)  # Between object and array
-            json_str = re.sub(r']\s*\[', '], [', json_str)  # Between arrays
+            # Tokenize the JSON string
+            for char in json_str:
+                if escape_next:
+                    current_token.append(char)
+                    escape_next = False
+                    continue
+                    
+                if char == '\\':
+                    current_token.append(char)
+                    escape_next = True
+                    continue
+                    
+                if char == '"' and not escape_next:
+                    in_string = not in_string
+                    current_token.append(char)
+                    if not in_string:  # End of string
+                        tokens.append(''.join(current_token))
+                        current_token = []
+                    continue
+                    
+                if in_string:
+                    current_token.append(char)
+                elif char in '{[]},:':
+                    if current_token:
+                        tokens.append(''.join(current_token))
+                        current_token = []
+                    tokens.append(char)
+                elif not char.isspace():
+                    current_token.append(char)
             
-            # Fix trailing/missing commas in arrays/objects
-            json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)  # Remove trailing commas
-            json_str = re.sub(r'{\s*}', '{}', json_str)  # Clean empty objects
-            json_str = re.sub(r'\[\s*]', '[]', json_str)  # Clean empty arrays
+            if current_token:
+                tokens.append(''.join(current_token))
             
-            return json_str
+            # Process tokens to fix structure
+            result = []
+            depth = 0
+            in_array = []  # Stack to track if we're in an array
+            needs_comma = False
+            
+            for token in tokens:
+                if token in '{[':
+                    if needs_comma:
+                        result.append(',')
+                    result.append(token)
+                    depth += 1
+                    in_array.append(token == '[')
+                    needs_comma = False
+                elif token in ']}':
+                    matching_bracket = '[' if token == ']' else '{'
+                    if depth > 0 and ((token == ']' and in_array[-1]) or (token == '}' and not in_array[-1])):
+                        result.append(token)
+                        depth -= 1
+                        in_array.pop()
+                        needs_comma = True
+                elif token == ',':
+                    if needs_comma:
+                        result.append(token)
+                        needs_comma = False
+                elif token == ':':
+                    result.append(token)
+                    needs_comma = False
+                else:
+                    if needs_comma and depth > 0:
+                        result.append(',')
+                    result.append(token)
+                    needs_comma = True
+            
+            # Join tokens and format with proper indentation
+            formatted = ''.join(result)
+            
+            # Additional cleanup for common issues
+            formatted = re.sub(r',\s*([}\]])', r'\1', formatted)  # Remove trailing commas
+            formatted = re.sub(r'([{\[])\s*([}\]])', r'\1\2', formatted)  # Clean empty structures
+            formatted = re.sub(r',\s*,', ',', formatted)  # Remove duplicate commas
+            
+            return formatted
 
         def sanitize_for_json(text: str) -> tuple[str, dict]:
             """
@@ -174,8 +240,8 @@ class MeetingProcessor:
                 text
             )
 
-            # Clean up JSON structure
-            sanitized = clean_json_structure(sanitized)
+            # Format and clean JSON structure
+            sanitized = format_json_structure(sanitized)
 
             return sanitized, replacements
 
@@ -191,8 +257,8 @@ class MeetingProcessor:
                 else:
                     restored = restored.replace(f'"{placeholder}"', f'"{original}"')
             
-            # Final structure cleanup after content restoration
-            restored = clean_json_structure(restored)
+            # Final structure cleanup
+            restored = format_json_structure(restored)
             return restored
 
         prompt = f"""
