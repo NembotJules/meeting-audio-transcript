@@ -224,18 +224,41 @@ class MeetingProcessor:
 
                     def clean_text_content(text):
                         """Clean text content while preserving special characters and French contractions"""
-                        # Create a list of common French contractions to protect
-                        french_contractions = [
-                            "d'", "l'", "n'", "s'", "qu'", "j'", "m'", "t'", "c'",
-                            "D'", "L'", "N'", "S'", "QU'", "J'", "M'", "T'", "C'"
+                        # Create a list of common French contractions and words with apostrophes
+                        french_patterns = [
+                            # Common contractions
+                            "d'", "l'", "n'", "s'", "qu'", "j'", "m'", "t'", "c'", "jusqu'", "presqu'",
+                            "D'", "L'", "N'", "S'", "QU'", "J'", "M'", "T'", "C'", "JUSQU'", "PRESQU'",
+                            # Common words with apostrophes
+                            "aujourd'hui", "d'abord", "d'accord", "d'ailleurs", "d'après",
+                            "d'activité", "d'analyse", "d'assistance", "d'échange", "d'exécution",
+                            "d'information", "d'observation", "d'un", "d'une", "d'être",
+                            # Add more patterns as needed
                         ]
+                        
+                        # Sort patterns by length (longest first) to avoid partial replacements
+                        french_patterns.sort(key=len, reverse=True)
                         
                         # Replace contractions with placeholders temporarily
                         contraction_placeholders = {}
-                        for i, contraction in enumerate(french_contractions):
+                        for i, pattern in enumerate(french_patterns):
                             placeholder = f"__CONTR_{i}__"
-                            contraction_placeholders[contraction] = placeholder
-                            text = text.replace(contraction, placeholder)
+                            contraction_placeholders[pattern] = placeholder
+                            # Use word boundary for more precise replacement
+                            text = re.sub(rf'\b{re.escape(pattern)}\b', placeholder, text)
+                        
+                        # Handle any remaining apostrophes that might be part of contractions
+                        # This catches dynamic contractions not in our list
+                        def protect_remaining_contractions(match):
+                            contraction = match.group(0)
+                            if contraction not in contraction_placeholders:
+                                placeholder = f"__CONTR_{len(contraction_placeholders)}__"
+                                contraction_placeholders[contraction] = placeholder
+                                return placeholder
+                            return contraction
+                        
+                        # Find remaining word + apostrophe + word patterns
+                        text = re.sub(r'\b\w+\'\w+\b', protect_remaining_contractions, text)
                         
                         # Clean the text
                         text = text.replace('\\', '\\\\')  # Escape backslashes
@@ -271,8 +294,8 @@ class MeetingProcessor:
                             protected_strings[key] = cleaned
                             return f'"{key}"'
                         
-                        # Enhanced string protection pattern
-                        string_pattern = r'"((?:[^"\\]|\\.)*)"'
+                        # Enhanced string protection pattern that handles escaped quotes
+                        string_pattern = r'"((?:[^"\\]|\\.|\\u[0-9a-fA-F]{4})*)"'
                         json_str = re.sub(string_pattern, protect_string, json_str)
                         
                         # Fix structural issues
@@ -284,6 +307,9 @@ class MeetingProcessor:
                         # Additional cleanup for potential French text issues
                         json_str = re.sub(r'([^\\])"([^"]*?)\'([^"]*?)"', r'\1"\2\'\3"', json_str)  # Fix unescaped apostrophes
                         json_str = re.sub(r'([^\\])\'([^\']*?)\'([^\']*?)\'', r'\1"\2\'\3"', json_str)  # Convert single quotes to double quotes
+                        
+                        # Handle any remaining problematic patterns
+                        json_str = re.sub(r'(?<=\w)\'(?=\w)', "'", json_str)  # Normalize mid-word apostrophes
                         
                         # Restore protected strings
                         for key, value in protected_strings.items():
