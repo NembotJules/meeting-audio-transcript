@@ -117,208 +117,112 @@ class MeetingProcessor:
         Returns:
             Structured meeting information as JSON
         """
-        def format_json_structure(json_str: str) -> str:
-            """Format and fix JSON structure using a token-based approach."""
-            tokens = []
-            in_string = False
-            escape_next = False
-            current_token = []
-            
-            # Tokenize the JSON string
-            for char in json_str:
-                if escape_next:
-                    current_token.append(char)
-                    escape_next = False
-                    continue
-                    
-                if char == '\\':
-                    current_token.append(char)
-                    escape_next = True
-                    continue
-                    
-                if char == '"' and not escape_next:
-                    in_string = not in_string
-                    current_token.append(char)
-                    if not in_string:  # End of string
-                        tokens.append(''.join(current_token))
-                        current_token = []
-                    continue
-                    
-                if in_string:
-                    current_token.append(char)
-                elif char in '{[]},:':
-                    if current_token:
-                        tokens.append(''.join(current_token))
-                        current_token = []
-                    tokens.append(char)
-                elif not char.isspace():
-                    current_token.append(char)
-            
-            if current_token:
-                tokens.append(''.join(current_token))
-            
-            # Process tokens to fix structure
-            result = []
-            depth = 0
-            in_array = []  # Stack to track if we're in an array
-            needs_comma = False
-            
-            for token in tokens:
-                if token in '{[':
-                    if needs_comma:
-                        result.append(',')
-                    result.append(token)
-                    depth += 1
-                    in_array.append(token == '[')
-                    needs_comma = False
-                elif token in ']}':
-                    matching_bracket = '[' if token == ']' else '{'
-                    if depth > 0 and ((token == ']' and in_array[-1]) or (token == '}' and not in_array[-1])):
-                        result.append(token)
-                        depth -= 1
-                        in_array.pop()
-                        needs_comma = True
-                elif token == ',':
-                    if needs_comma:
-                        result.append(token)
-                        needs_comma = False
-                elif token == ':':
-                    result.append(token)
-                    needs_comma = False
-                else:
-                    if needs_comma and depth > 0:
-                        result.append(',')
-                    result.append(token)
-                    needs_comma = True
-            
-            # Join tokens and format with proper indentation
-            formatted = ''.join(result)
-            
-            # Additional cleanup for common issues
-            formatted = re.sub(r',\s*([}\]])', r'\1', formatted)  # Remove trailing commas
-            formatted = re.sub(r'([{\[])\s*([}\]])', r'\1\2', formatted)  # Clean empty structures
-            formatted = re.sub(r',\s*,', ',', formatted)  # Remove duplicate commas
-            
-            return formatted
+        # Extract information in stages to avoid complex JSON parsing
+        try:
+            # 1. Extract attendance
+            attendance_prompt = f"""
+            Extract ONLY the attendance information from the meeting note.
+            Return as two lists in this EXACT format (no other text):
+            {{"present": ["name1", "name2"], "absent": ["name3", "name4"]}}
 
-        def sanitize_for_json(text: str) -> tuple[str, dict]:
+            Meeting Note:
+            {text}
             """
-            Sanitize text for JSON parsing by replacing problematic content with placeholders.
-            Returns sanitized text and mapping to restore original content.
+            attendance_response = self._make_api_call(attendance_prompt)
+            attendance_data = json.loads(attendance_response)
+
+            # 2. Extract agenda items
+            agenda_prompt = f"""
+            Extract ONLY the agenda items from the meeting note.
+            Return as a list in this EXACT format (no other text):
+            {{"agenda_items": ["item1", "item2", "item3"]}}
+
+            Meeting Note:
+            {text}
             """
-            replacements = {}
-            counter = 0
+            agenda_response = self._make_api_call(agenda_prompt)
+            agenda_data = json.loads(agenda_response)
 
-            def create_placeholder(match):
-                nonlocal counter
-                content = match.group(0)
-                # Don't replace if it's a known JSON key
-                known_keys = {
-                    '"meeting_metadata"', '"date"', '"title"',
-                    '"attendance"', '"present"', '"absent"',
-                    '"agenda_items"', '"activities_review"',
-                    '"actor"', '"dossier"', '"activities"',
-                    '"results"', '"perspectives"',
-                    '"resolutions_summary"', '"resolution"',
-                    '"responsible"', '"deadline"', '"status"',
-                    '"key_highlights"', '"miscellaneous"',
-                    '"sanctions_summary"', '"name"', '"reason"',
-                    '"amount"', '"execution_date"', '"report_count"'
-                }
-                if content in known_keys:
-                    return content
-                
-                placeholder = f"___PLACEHOLDER_{counter}___"
-                replacements[placeholder] = content.strip('"')  # Remove quotes as they'll be added back
-                counter += 1
-                return f'"{placeholder}"'  # Keep JSON string format
+            # 3. Extract activities review
+            activities_prompt = f"""
+            Extract ONLY the activities review from the meeting note.
+            Return as a list of objects in this EXACT format (no other text):
+            {{"activities_review": [
+                {{"actor": "name", "dossier": "text", "activities": "text", "results": "text", "perspectives": "text"}}
+            ]}}
 
-            # First pass: Protect all string values
-            sanitized = re.sub(
-                r'"([^"\\]*(?:\\.[^"\\]*)*)"',  # Match quoted strings
-                create_placeholder,
-                text
-            )
+            Meeting Note:
+            {text}
+            """
+            activities_response = self._make_api_call(activities_prompt)
+            activities_data = json.loads(activities_response)
 
-            # Format and clean JSON structure
-            sanitized = format_json_structure(sanitized)
+            # 4. Extract resolutions
+            resolutions_prompt = f"""
+            Extract ONLY the resolutions from the meeting note.
+            Return as a list of objects in this EXACT format (no other text):
+            {{"resolutions_summary": [
+                {{"date": "DD/MM/YYYY", "dossier": "text", "resolution": "text", "responsible": "name", "deadline": "DD/MM/YYYY", "status": "text"}}
+            ]}}
 
-            return sanitized, replacements
+            Meeting Note:
+            {text}
+            """
+            resolutions_response = self._make_api_call(resolutions_prompt)
+            resolutions_data = json.loads(resolutions_response)
 
-        def restore_content(text: str, replacements: dict) -> str:
-            """Restore original content from placeholders."""
-            restored = text
-            for placeholder, original in replacements.items():
-                # Properly handle quotes in the replacement
-                if '"' in original or "'" in original:
-                    # Escape any quotes in the original content
-                    escaped = original.replace('"', '\\"')
-                    restored = restored.replace(f'"{placeholder}"', f'"{escaped}"')
-                else:
-                    restored = restored.replace(f'"{placeholder}"', f'"{original}"')
-            
-            # Final structure cleanup
-            restored = format_json_structure(restored)
-            return restored
+            # 5. Extract sanctions
+            sanctions_prompt = f"""
+            Extract ONLY the sanctions from the meeting note.
+            Return as a list of objects in this EXACT format (no other text):
+            {{"sanctions_summary": [
+                {{"name": "text", "reason": "text", "amount": number, "date": "DD/MM/YYYY", "status": "text"}}
+            ]}}
 
-        prompt = f"""
-        You are a precise JSON extractor. Extract structured information from the meeting note and format it as valid JSON.
-        Follow these rules strictly:
-        1. Use ONLY the specified property names
-        2. Always enclose property names in double quotes
-        3. Always enclose string values in double quotes
-        4. Format numbers without quotes
-        5. Return ONLY the JSON object, no other text
-        6. Always use commas between array elements
-        7. Never leave trailing commas
-        
-        Required structure:
-        {{
-            "meeting_metadata": {{
-                "date": "{meeting_date}",
-                "title": "{meeting_title}"
-            }},
-            "attendance": {{
-                "present": [],
-                "absent": []
-            }},
-            "agenda_items": [],
-            "activities_review": [
-                {{
-                    "actor": "",
-                    "dossier": "",
-                    "activities": "",
-                    "results": "",
-                    "perspectives": ""
-                }}
-            ],
-            "resolutions_summary": [
-                {{
-                    "date": "",
-                    "dossier": "",
-                    "resolution": "",
-                    "responsible": "",
-                    "deadline": "",
-                    "status": ""
-                }}
-            ],
-            "key_highlights": [],
-            "miscellaneous": [],
-            "sanctions_summary": [
-                {{
-                    "name": "",
-                    "reason": "",
-                    "amount": 0,
-                    "date": "",
-                    "status": ""
-                }}
-            ]
-        }}
+            Meeting Note:
+            {text}
+            """
+            sanctions_response = self._make_api_call(sanctions_prompt)
+            sanctions_data = json.loads(sanctions_response)
 
-        Meeting Note:
-        {text}
-        """
-        
+            # 6. Extract miscellaneous items
+            misc_prompt = f"""
+            Extract ONLY miscellaneous items and key highlights from the meeting note.
+            Return in this EXACT format (no other text):
+            {{"key_highlights": ["item1", "item2"], "miscellaneous": ["item1", "item2"]}}
+
+            Meeting Note:
+            {text}
+            """
+            misc_response = self._make_api_call(misc_prompt)
+            misc_data = json.loads(misc_response)
+
+            # Combine all data
+            combined_data = {
+                "meeting_metadata": {
+                    "date": meeting_date,
+                    "title": meeting_title
+                },
+                "attendance": attendance_data,
+                "agenda_items": agenda_data["agenda_items"],
+                "activities_review": activities_data["activities_review"],
+                "resolutions_summary": resolutions_data["resolutions_summary"],
+                "sanctions_summary": sanctions_data["sanctions_summary"],
+                "key_highlights": misc_data["key_highlights"],
+                "miscellaneous": misc_data["miscellaneous"]
+            }
+
+            # Validate the combined data
+            return self.validate_meeting_json(combined_data)
+
+        except Exception as e:
+            print(f"\nProcessing Error:")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
+            raise Exception(f"Failed to extract structured information: {str(e)}")
+
+    def _make_api_call(self, prompt: str) -> str:
+        """Make API call to Deepseek and return the response content."""
         try:
             headers = {
                 "Content-Type": "application/json",
@@ -341,7 +245,6 @@ class MeetingProcessor:
             if response.status_code != 200:
                 raise Exception(f"API error: {response.status_code}")
             
-            # Extract JSON from response
             content = response.json()["choices"][0]["message"]["content"].strip()
             
             # Remove any markdown code block markers
@@ -351,56 +254,11 @@ class MeetingProcessor:
             json_match = re.search(r'({[\s\S]*})', content)
             if not json_match:
                 raise Exception("No valid JSON object found in response")
-            content = json_match.group(1)
             
-            # First pass: Sanitize the content
-            sanitized_content, replacements = sanitize_for_json(content)
+            return json_match.group(1)
             
-            try:
-                # Parse the sanitized JSON
-                parsed_data = json.loads(sanitized_content)
-                
-                # Convert back to string with proper formatting
-                formatted_json = json.dumps(parsed_data, ensure_ascii=False, indent=2)
-                
-                # Restore the original content
-                restored_json = restore_content(formatted_json, replacements)
-                
-                # Final parse to ensure validity
-                extracted_data = json.loads(restored_json)
-                
-                # Add meeting metadata
-                extracted_data["meeting_metadata"] = {
-                    "date": meeting_date,
-                    "title": meeting_title
-                }
-                
-                # Validate the extracted data
-                return self.validate_meeting_json(extracted_data)
-                
-            except json.JSONDecodeError as e:
-                print(f"\nJSON Parsing Error Details:")
-                print(f"Error message: {str(e)}")
-                print(f"Error position: {e.pos}")
-                print(f"Line number: {e.lineno}")
-                print(f"Column number: {e.colno}")
-                
-                # Show context around the error
-                context_start = max(0, e.pos - 200)
-                context_end = min(len(sanitized_content), e.pos + 200)
-                error_context = sanitized_content[context_start:context_end]
-                print("\nContext around error:")
-                print("..." if context_start > 0 else "", end="")
-                print(error_context, end="")
-                print("..." if context_end < len(sanitized_content) else "")
-                print(" " * (min(200, e.pos - context_start)) + "^")
-                raise Exception(f"JSON parsing error: {str(e)}")
-                
         except Exception as e:
-            print(f"\nProcessing Error:")
-            print(f"Error type: {type(e).__name__}")
-            print(f"Error message: {str(e)}")
-            raise Exception(f"Failed to extract structured information: {str(e)}")
+            raise Exception(f"API call failed: {str(e)}")
 
     def validate_meeting_json(self, data: Dict) -> Dict:
         """
