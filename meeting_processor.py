@@ -51,42 +51,54 @@ def clean_json_response(response: str) -> str:
         return None
     
     try:
-        # Remove any markdown code block markers
-        response = re.sub(r'```(?:json)?\s*|\s*```', '', response.strip())
+        # Remove any markdown code block markers and extra whitespace
+        cleaned = response.strip()
+        cleaned = re.sub(r'```(?:json)?\s*', '', cleaned)
+        cleaned = re.sub(r'\s*```', '', cleaned)
+        cleaned = cleaned.strip()
         
-        # Find the actual JSON content
-        json_match = re.search(r'({[\s\S]*}|\[[\s\S]*\])', response)
-        if not json_match:
+        # Try to find JSON content - look for content between { } or [ ]
+        json_patterns = [
+            r'({.*})',  # Object
+            r'(\[.*\])',  # Array
+        ]
+        
+        json_str = None
+        for pattern in json_patterns:
+            match = re.search(pattern, cleaned, re.DOTALL)
+            if match:
+                json_str = match.group(1)
+                break
+        
+        if not json_str:
+            print(f"No JSON found in response: {response}")
             return None
         
-        json_str = json_match.group(0)
+        # Try to parse the JSON as-is first
+        try:
+            json.loads(json_str)
+            return json_str
+        except json.JSONDecodeError as e:
+            print(f"JSON parse error: {str(e)}")
+            print(f"Attempting to fix JSON...")
         
-        # Fix common JSON formatting issues
-        # 1. Fix missing commas between array elements
-        json_str = re.sub(r'}\s*{', '},{', json_str)
-        json_str = re.sub(r']\s*{', '],{', json_str)
-        json_str = re.sub(r'}\s*\[', '},\[', json_str)
+        # Simple fixes for common issues
+        fixed_json = json_str
         
-        # 2. Fix trailing commas
-        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+        # Fix trailing commas
+        fixed_json = re.sub(r',(\s*[}\]])', r'\1', fixed_json)
         
-        # 3. Fix missing quotes around property names
-        json_str = re.sub(r'([{,]\s*)(\w+)(:)', r'\1"\2"\3', json_str)
-        
-        # 4. Fix single quotes
-        json_str = json_str.replace("'", '"')
-        
-        # 5. Fix boolean and null values
-        json_str = re.sub(r':\s*True\b', ': true', json_str)
-        json_str = re.sub(r':\s*False\b', ': false', json_str)
-        json_str = re.sub(r':\s*None\b', ': null', json_str)
-        
-        # Validate the JSON
-        json.loads(json_str)  # This will raise an exception if still invalid
-        return json_str
+        # Try parsing again
+        try:
+            json.loads(fixed_json)
+            return fixed_json
+        except json.JSONDecodeError as e:
+            print(f"Still cannot parse JSON after fixes: {str(e)}")
+            print(f"Problematic JSON: {fixed_json}")
+            return None
         
     except Exception as e:
-        print(f"Error cleaning JSON: {str(e)}")
+        print(f"Error in clean_json_response: {str(e)}")
         print(f"Original response: {response}")
         return None
 
@@ -298,22 +310,17 @@ class MeetingProcessor:
             )
             
             if response.status_code != 200:
-                raise Exception(f"API error: {response.status_code}")
+                raise Exception(f"API error: {response.status_code} - {response.text}")
             
             content = response.json()["choices"][0]["message"]["content"].strip()
+            print(f"Raw API response: {content}")
             
-            # Clean and validate the JSON response
+            # Clean the JSON response
             cleaned_json = clean_json_response(content)
             if not cleaned_json:
-                print(f"\nFailed to clean JSON response. Original content:\n{content}")
-                # Try to extract just the JSON part using a more lenient pattern
-                json_match = re.search(r'({[^}]*}|\[[^\]]*\])', content)
-                if json_match:
-                    cleaned_json = clean_json_response(json_match.group(0))
-                
-                if not cleaned_json:
-                    raise Exception("Failed to extract valid JSON from response")
+                raise Exception("Failed to extract valid JSON from response")
             
+            print(f"Cleaned JSON: {cleaned_json}")
             return cleaned_json
             
         except Exception as e:
