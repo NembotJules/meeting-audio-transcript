@@ -45,6 +45,51 @@ def save_meeting_data(data: Dict, output_dir: str) -> str:
     
     return filepath
 
+def clean_json_response(response: str) -> str:
+    """Clean and fix common JSON formatting issues in API responses."""
+    if not response:
+        return None
+    
+    try:
+        # Remove any markdown code block markers
+        response = re.sub(r'```(?:json)?\s*|\s*```', '', response.strip())
+        
+        # Find the actual JSON content
+        json_match = re.search(r'({[\s\S]*}|\[[\s\S]*\])', response)
+        if not json_match:
+            return None
+        
+        json_str = json_match.group(0)
+        
+        # Fix common JSON formatting issues
+        # 1. Fix missing commas between array elements
+        json_str = re.sub(r'}\s*{', '},{', json_str)
+        json_str = re.sub(r']\s*{', '],{', json_str)
+        json_str = re.sub(r'}\s*\[', '},\[', json_str)
+        
+        # 2. Fix trailing commas
+        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+        
+        # 3. Fix missing quotes around property names
+        json_str = re.sub(r'([{,]\s*)(\w+)(:)', r'\1"\2"\3', json_str)
+        
+        # 4. Fix single quotes
+        json_str = json_str.replace("'", '"')
+        
+        # 5. Fix boolean and null values
+        json_str = re.sub(r':\s*True\b', ': true', json_str)
+        json_str = re.sub(r':\s*False\b', ': false', json_str)
+        json_str = re.sub(r':\s*None\b', ': null', json_str)
+        
+        # Validate the JSON
+        json.loads(json_str)  # This will raise an exception if still invalid
+        return json_str
+        
+    except Exception as e:
+        print(f"Error cleaning JSON: {str(e)}")
+        print(f"Original response: {response}")
+        return None
+
 class MeetingProcessor:
     def __init__(self, mistral_api_key: str, deepseek_api_key: str):
         """Initialize with necessary API keys."""
@@ -117,7 +162,17 @@ class MeetingProcessor:
         Returns:
             Structured meeting information as JSON
         """
-        # Extract information in stages to avoid complex JSON parsing
+        def safe_parse_json(json_str: str, default_value: Dict) -> Dict:
+            """Safely parse JSON with fallback to default value."""
+            if not json_str:
+                return default_value
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError as e:
+                print(f"JSON parsing error: {str(e)}")
+                print(f"Problematic JSON: {json_str}")
+                return default_value
+
         try:
             # 1. Extract attendance
             attendance_prompt = f"""
@@ -129,7 +184,7 @@ class MeetingProcessor:
             {text}
             """
             attendance_response = self._make_api_call(attendance_prompt)
-            attendance_data = json.loads(attendance_response)
+            attendance_data = safe_parse_json(attendance_response, {"present": [], "absent": []})
 
             # 2. Extract agenda items
             agenda_prompt = f"""
@@ -141,7 +196,7 @@ class MeetingProcessor:
             {text}
             """
             agenda_response = self._make_api_call(agenda_prompt)
-            agenda_data = json.loads(agenda_response)
+            agenda_data = safe_parse_json(agenda_response, {"agenda_items": []})
 
             # 3. Extract activities review
             activities_prompt = f"""
@@ -155,7 +210,7 @@ class MeetingProcessor:
             {text}
             """
             activities_response = self._make_api_call(activities_prompt)
-            activities_data = json.loads(activities_response)
+            activities_data = safe_parse_json(activities_response, {"activities_review": []})
 
             # 4. Extract resolutions
             resolutions_prompt = f"""
@@ -169,7 +224,7 @@ class MeetingProcessor:
             {text}
             """
             resolutions_response = self._make_api_call(resolutions_prompt)
-            resolutions_data = json.loads(resolutions_response)
+            resolutions_data = safe_parse_json(resolutions_response, {"resolutions_summary": []})
 
             # 5. Extract sanctions
             sanctions_prompt = f"""
@@ -183,7 +238,7 @@ class MeetingProcessor:
             {text}
             """
             sanctions_response = self._make_api_call(sanctions_prompt)
-            sanctions_data = json.loads(sanctions_response)
+            sanctions_data = safe_parse_json(sanctions_response, {"sanctions_summary": []})
 
             # 6. Extract miscellaneous items
             misc_prompt = f"""
@@ -195,21 +250,21 @@ class MeetingProcessor:
             {text}
             """
             misc_response = self._make_api_call(misc_prompt)
-            misc_data = json.loads(misc_response)
+            misc_data = safe_parse_json(misc_response, {"key_highlights": [], "miscellaneous": []})
 
-            # Combine all data
+            # Combine all data with proper error handling
             combined_data = {
                 "meeting_metadata": {
                     "date": meeting_date,
                     "title": meeting_title
                 },
                 "attendance": attendance_data,
-                "agenda_items": agenda_data["agenda_items"],
-                "activities_review": activities_data["activities_review"],
-                "resolutions_summary": resolutions_data["resolutions_summary"],
-                "sanctions_summary": sanctions_data["sanctions_summary"],
-                "key_highlights": misc_data["key_highlights"],
-                "miscellaneous": misc_data["miscellaneous"]
+                "agenda_items": agenda_data.get("agenda_items", []),
+                "activities_review": activities_data.get("activities_review", []),
+                "resolutions_summary": resolutions_data.get("resolutions_summary", []),
+                "sanctions_summary": sanctions_data.get("sanctions_summary", []),
+                "key_highlights": misc_data.get("key_highlights", []),
+                "miscellaneous": misc_data.get("miscellaneous", [])
             }
 
             # Validate the combined data
@@ -247,17 +302,24 @@ class MeetingProcessor:
             
             content = response.json()["choices"][0]["message"]["content"].strip()
             
-            # Remove any markdown code block markers
-            content = re.sub(r'```(?:json)?\s*|\s*```', '', content)
+            # Clean and validate the JSON response
+            cleaned_json = clean_json_response(content)
+            if not cleaned_json:
+                print(f"\nFailed to clean JSON response. Original content:\n{content}")
+                # Try to extract just the JSON part using a more lenient pattern
+                json_match = re.search(r'({[^}]*}|\[[^\]]*\])', content)
+                if json_match:
+                    cleaned_json = clean_json_response(json_match.group(0))
+                
+                if not cleaned_json:
+                    raise Exception("Failed to extract valid JSON from response")
             
-            # Find the actual JSON content
-            json_match = re.search(r'({[\s\S]*})', content)
-            if not json_match:
-                raise Exception("No valid JSON object found in response")
-            
-            return json_match.group(1)
+            return cleaned_json
             
         except Exception as e:
+            print(f"\nAPI Call Error:")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
             raise Exception(f"API call failed: {str(e)}")
 
     def validate_meeting_json(self, data: Dict) -> Dict:
