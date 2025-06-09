@@ -82,6 +82,12 @@ def clean_json_response(response: str) -> str:
             print(f"JSON parse error: {str(e)}")
             print(f"Attempting to fix JSON...")
         
+        # Check if JSON appears to be truncated (incomplete)
+        if not json_str.rstrip().endswith(('}', ']')):
+            print("JSON appears to be truncated!")
+            # Try to close incomplete objects/arrays
+            json_str = try_fix_truncated_json(json_str)
+        
         # Simple fixes for common issues
         fixed_json = json_str
         
@@ -94,13 +100,68 @@ def clean_json_response(response: str) -> str:
             return fixed_json
         except json.JSONDecodeError as e:
             print(f"Still cannot parse JSON after fixes: {str(e)}")
-            print(f"Problematic JSON: {fixed_json}")
+            print(f"Problematic JSON (first 500 chars): {fixed_json[:500]}...")
             return None
         
     except Exception as e:
         print(f"Error in clean_json_response: {str(e)}")
-        print(f"Original response: {response}")
+        print(f"Original response (first 500 chars): {response[:500]}...")
         return None
+
+def try_fix_truncated_json(json_str: str) -> str:
+    """Attempt to fix truncated JSON by adding missing closing brackets."""
+    try:
+        # Count opening and closing brackets
+        open_braces = json_str.count('{')
+        close_braces = json_str.count('}')
+        open_brackets = json_str.count('[')
+        close_brackets = json_str.count(']')
+        
+        # Find the last complete object/array and truncate there
+        # This is a simple approach - remove incomplete trailing content
+        lines = json_str.split('\n')
+        
+        # Work backwards to find the last complete line with proper structure
+        for i in range(len(lines) - 1, -1, -1):
+            line = lines[i].strip()
+            if line.endswith('}') or line.endswith('},'):
+                # Found a complete object, keep up to this line
+                truncated_json = '\n'.join(lines[:i+1])
+                
+                # Remove trailing comma if present
+                if truncated_json.rstrip().endswith(','):
+                    truncated_json = truncated_json.rstrip()[:-1]
+                
+                # Add missing closing brackets
+                missing_braces = open_braces - close_braces
+                missing_brackets = open_brackets - close_brackets
+                
+                # Only count what's in our truncated version
+                trunc_open_braces = truncated_json.count('{')
+                trunc_close_braces = truncated_json.count('}')
+                trunc_open_brackets = truncated_json.count('[')
+                trunc_close_brackets = truncated_json.count(']')
+                
+                # Add the missing closing brackets
+                for _ in range(trunc_open_braces - trunc_close_braces):
+                    truncated_json += '\n    }'
+                for _ in range(trunc_open_brackets - trunc_close_brackets):
+                    truncated_json += '\n]'
+                
+                print(f"Attempted to fix truncated JSON by closing at line {i+1}")
+                return truncated_json
+        
+        # If we couldn't find a good truncation point, just add closing brackets
+        for _ in range(open_braces - close_braces):
+            json_str += '}'
+        for _ in range(open_brackets - close_brackets):
+            json_str += ']'
+        
+        return json_str
+        
+    except Exception as e:
+        print(f"Error trying to fix truncated JSON: {str(e)}")
+        return json_str
 
 class MeetingProcessor:
     def __init__(self, mistral_api_key: str, deepseek_api_key: str):
@@ -300,7 +361,7 @@ class MeetingProcessor:
                 "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
-                "max_tokens": 4000
+                "max_tokens": 8000  # Increased from 4000 to handle longer responses
             }
             
             response = requests.post(
@@ -313,14 +374,19 @@ class MeetingProcessor:
                 raise Exception(f"API error: {response.status_code} - {response.text}")
             
             content = response.json()["choices"][0]["message"]["content"].strip()
-            print(f"Raw API response: {content}")
+            print(f"Raw API response length: {len(content)} characters")
+            
+            # Check if response was truncated
+            finish_reason = response.json()["choices"][0].get("finish_reason", "")
+            if finish_reason == "length":
+                print("WARNING: Response was truncated due to token limit!")
             
             # Clean the JSON response
             cleaned_json = clean_json_response(content)
             if not cleaned_json:
                 raise Exception("Failed to extract valid JSON from response")
             
-            print(f"Cleaned JSON: {cleaned_json}")
+            print(f"Successfully cleaned JSON")
             return cleaned_json
             
         except Exception as e:
