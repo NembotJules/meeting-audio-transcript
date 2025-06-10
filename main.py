@@ -250,11 +250,15 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         "balance_date": date
     }
 
-    # Define expected team members (add/modify as needed)
+    # Define expected team members (real names from historical data)
     expected_members = [
-        "Grace Divine", "Vladimir Soua", "Gael Kiampi", "Emmanuel Teinga",
-        "Aristide Kamga", "Eric Nana", "Divine Kenmogne", "Christ Fotsing",
-        "Armand Tchoupou", "Brice Kamdem", "Ornela Tamo", "Joel Monthe"
+        "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
+        "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
+        "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
+        "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
+        "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
+        "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
+        "Charlène GHOMSI"
     ]
 
     # Extract presence list
@@ -287,29 +291,96 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
                 numbered_items.append(item)
             extracted_data["agenda_items"] = numbered_items
 
-    # Extract start time
-    start_time_match = re.search(r"(?:début|commence|commencée)[\s\w]*?(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))", transcription, re.IGNORECASE)
-    if start_time_match:
-        extracted_data["start_time"] = start_time_match.group(1).replace("h:", "h").replace("min", "min")
+    # Extract start time with improved patterns
+    start_time_patterns = [
+        r"(?:début|commence|commencée|démarré|start)[\s\w]*?(\d{1,2}[h:]\d{2})",
+        r"(?:début|commence|commencée|démarré|start)[\s\w]*?(\d{1,2}h\d{2}min)",
+        r"(?:début|commence|commencée|démarré|start)[\s\w]*?(\d{1,2}h)",
+        r"(?:à|vers|around)\s*(\d{1,2}[h:]\d{2})",
+        r"(?:à|vers|around)\s*(\d{1,2}h)",
+        r"(\d{1,2}[h:]\d{2})[\s\w]*(?:début|commence|start)",
+        r"(\d{1,2}h\d{2}min)[\s\w]*(?:début|commence|start)",
+        r"(\d{1,2}h)[\s\w]*(?:début|commence|start)"
+    ]
+    
+    for pattern in start_time_patterns:
+        start_time_match = re.search(pattern, transcription, re.IGNORECASE)
+        if start_time_match:
+            time_str = start_time_match.group(1)
+            # Normalize format
+            time_str = time_str.replace(":", "h").replace("min", "min")
+            if not time_str.endswith("h") and not time_str.endswith("min") and "h" in time_str:
+                if not time_str.endswith("min"):
+                    time_str += "min"
+            extracted_data["start_time"] = time_str
+            break
 
-    # Extract duration and calculate end time
-    duration_match = re.search(r"(?:durée|dure|duré|lasted)[\s\w]*?(\d{1,2}h(?:\d{1,2}min)?(?:\d{1,2}s)?)", transcription, re.IGNORECASE)
-    end_time_match = re.search(r"(?:fin|terminée|terminé|ended)[\s\w]*?(\d{1,2}(?:h\d{2}min|h:\d{2}|\d{2}min))", transcription, re.IGNORECASE)
-    if end_time_match:
-        extracted_data["end_time"] = end_time_match.group(1).replace("h:", "h").replace("min", "min")
-    elif start_time_match and duration_match:
-        start_time_str = start_time_match.group(1).replace("h", ":").replace("min", "")
-        try:
-            start_time = datetime.strptime(start_time_str, "%H:%M")
-        except ValueError:
-            start_time = datetime.strptime(start_time_str, "%H")
-        duration_str = duration_match.group(1)
-        hours = int(re.search(r"(\d+)h", duration_str).group(1)) if "h" in duration_str else 0
-        minutes = int(re.search(r"(\d+)min", duration_str).group(1)) if "min" in duration_str else 0
-        seconds = int(re.search(r"(\d+)s", duration_str).group(1)) if "s" in duration_str else 0
-        duration_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
-        end_time = start_time + duration_delta
-        extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
+    # Extract end time with improved patterns
+    end_time_patterns = [
+        r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}[h:]\d{2})",
+        r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}h\d{2}min)",
+        r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}h)",
+        r"(?:jusqu'à|until|vers|around)[\s\w]*?(\d{1,2}[h:]\d{2})",
+        r"(?:jusqu'à|until|vers|around)[\s\w]*?(\d{1,2}h)",
+        r"(\d{1,2}[h:]\d{2})[\s\w]*(?:fin|terminée|end)",
+        r"(\d{1,2}h\d{2}min)[\s\w]*(?:fin|terminée|end)",
+        r"(\d{1,2}h)[\s\w]*(?:fin|terminée|end)"
+    ]
+    
+    for pattern in end_time_patterns:
+        end_time_match = re.search(pattern, transcription, re.IGNORECASE)
+        if end_time_match:
+            time_str = end_time_match.group(1)
+            # Normalize format
+            time_str = time_str.replace(":", "h").replace("min", "min")
+            if not time_str.endswith("h") and not time_str.endswith("min") and "h" in time_str:
+                if not time_str.endswith("min"):
+                    time_str += "min"
+            extracted_data["end_time"] = time_str
+            break
+
+    # Extract duration and calculate end time if we have start time but no end time
+    if extracted_data["start_time"] != "Non spécifié" and extracted_data["end_time"] == "Non spécifié":
+        duration_patterns = [
+            r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}h(?:\d{1,2}min)?)",
+            r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}h)",
+            r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}min)",
+            r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}\s*heures?)"
+        ]
+        
+        for pattern in duration_patterns:
+            duration_match = re.search(pattern, transcription, re.IGNORECASE)
+            if duration_match:
+                try:
+                    start_time_str = extracted_data["start_time"].replace("h", ":").replace("min", "")
+                    if ":" not in start_time_str:
+                        start_time_str += ":00"
+                    start_time = datetime.strptime(start_time_str, "%H:%M")
+                    
+                    duration_str = duration_match.group(1)
+                    hours = 0
+                    minutes = 0
+                    
+                    if "h" in duration_str:
+                        hours_match = re.search(r"(\d+)h", duration_str)
+                        if hours_match:
+                            hours = int(hours_match.group(1))
+                    
+                    if "min" in duration_str:
+                        minutes_match = re.search(r"(\d+)min", duration_str)
+                        if minutes_match:
+                            minutes = int(minutes_match.group(1))
+                    elif "heures" in duration_str or "heure" in duration_str:
+                        hours_match = re.search(r"(\d+)", duration_str)
+                        if hours_match:
+                            hours = int(hours_match.group(1))
+                    
+                    duration_delta = timedelta(hours=hours, minutes=minutes)
+                    end_time = start_time + duration_delta
+                    extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
+                    break
+                except (ValueError, AttributeError) as e:
+                    continue
 
     # Extract rapporteur and president
     rapporteur_match = re.search(r"(Rapporteur|Rapporteuse)[:\s]*([A-Z][a-z]+(?: [A-Z][a-z]+)?)", transcription, re.IGNORECASE)
@@ -423,8 +494,7 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         }]
 
     # Apply missing data from history (excluding current meeting)
-    historical_meetings = load_historical_meetings(exclude_date=date)
-    extracted_data = get_missing_data_from_history(extracted_data, historical_meetings)
+    extracted_data = smart_historical_data_filling(extracted_data, date, allow_circular=False)
 
     return extracted_data
 
@@ -624,9 +694,12 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
        - "V- Divers"
     
     2. ACTIVITIES REVIEW: Create entries for ALL team members, not just those mentioned:
-       - Grace Divine, Vladimir Soua, Gael Kiampi, Emmanuel Teinga
-       - Aristide Kamga, Eric Nana, Divine Kenmogne, Christ Fotsing
-       - Armand Tchoupou, Brice Kamdem, Ornela Tamo, Joel Monthe
+       - Grace Divine, Vladimir SOUA, Gael KIAMPI, Emmanuel TEINGA
+       - Francis KAMSU, Jordan KAMSU-KOM, Loïc KAMENI, Christian DJIMELI
+       - Daniel BAYECK, Brice DZANGUE, Sherelle KANA, Jules NEMBOT
+       - Nour MAHAMAT, Franklin TANDJA, Marcellin SEUJIP, Divine NDE
+       - Brian ELLA ELLA, Amelin EPOH, Franklin YOUMBI, Cédric DONFACK
+       - Wilfried DOPGANG, Ismaël POUNGOUM, Éric BEIDI, Boris ON MAKONG, Charlène GHOMSI
        - If not mentioned, use "RAS" for activities, results, and perspectives
     
     3. If the current transcript mentions ongoing sanctions or doesn't specify new sanctions, use the sanctions from the historical context with updated dates.
@@ -718,8 +791,8 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             st.error(f"API error: {extracted_data['error']}. Falling back.")
             return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
-        # Fill in missing data from historical meetings (as a backup) - excluding current meeting
-        extracted_data = get_missing_data_from_history(extracted_data, historical_meetings)
+        # Fill in missing data from historical meetings (as a backup) - using smart filling
+        extracted_data = smart_historical_data_filling(extracted_data, date, allow_circular=False)
 
         # Add meeting metadata if not present
         if "meeting_metadata" not in extracted_data:
@@ -951,9 +1024,13 @@ def ensure_complete_member_data(extracted_info):
     
     # Define expected team members
     expected_members = [
-        "Grace Divine", "Vladimir Soua", "Gael Kiampi", "Emmanuel Teinga",
-        "Aristide Kamga", "Eric Nana", "Divine Kenmogne", "Christ Fotsing", 
-        "Armand Tchoupou", "Brice Kamdem", "Ornela Tamo", "Joel Monthe"
+        "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
+        "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
+        "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
+        "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
+        "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
+        "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
+        "Charlène GHOMSI"
     ]
     
     # Ensure activities_review has all members
@@ -1075,6 +1152,154 @@ def show_transcript_quality_tips():
            - Name speakers for activities
         """)
 
+def smart_historical_data_filling(extracted_data, date, allow_circular=False):
+    """
+    Intelligently fill missing data using historical meetings as memory.
+    This function allows using the current meeting's JSON if it exists to test perfect generation.
+    """
+    try:
+        # Load historical meetings (include current if allow_circular=True for testing)
+        exclude_date = None if allow_circular else date
+        historical_meetings = load_historical_meetings(exclude_date=exclude_date)
+        
+        if not historical_meetings:
+            return extracted_data
+        
+        st.info(f"🧠 Using historical memory from {len(historical_meetings)} meetings to fill gaps...")
+        
+        # Use the most recent meeting as primary memory source
+        latest_meeting = historical_meetings[0]
+        
+        # Fill missing activity data using historical perspectives as current activities
+        activities = extracted_data.get("activities_review", [])
+        if len(activities) < 15:  # If we have incomplete activity data
+            st.info("📋 Filling missing activity data from historical memory...")
+            
+            # Create lookup of existing activities by actor
+            existing_actors = {activity.get("actor", ""): activity for activity in activities}
+            
+            # Get expected team members
+            expected_members = [
+                "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
+                "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
+                "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
+                "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
+                "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
+                "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
+                "Charlène GHOMSI"
+            ]
+            
+            # Use historical data to fill missing member activities
+            historical_activities = latest_meeting.get("activities_review", [])
+            historical_actors = {activity.get("actor", ""): activity for activity in historical_activities}
+            
+            complete_activities = []
+            for member in expected_members:
+                if member in existing_actors:
+                    # Use existing data
+                    complete_activities.append(existing_actors[member])
+                elif member in historical_actors:
+                    # Transform historical perspectives into current activities
+                    historical_activity = historical_actors[member]
+                    perspectives = historical_activity.get("perspectives", "")
+                    
+                    if perspectives and perspectives not in ["RAS", "Non spécifié", ""]:
+                        # Use perspectives as current activities
+                        complete_activities.append({
+                            "actor": member,
+                            "dossier": historical_activity.get("dossier", "Non spécifié"),
+                            "activities": f"Continuation: {perspectives}",
+                            "results": "En cours",
+                            "perspectives": "À définir selon avancement"
+                        })
+                        st.write(f"   • {member}: Continued from '{perspectives[:50]}...'")
+                    else:
+                        # Use the last known activity
+                        complete_activities.append({
+                            "actor": member,
+                            "dossier": historical_activity.get("dossier", "Non spécifié"),
+                            "activities": historical_activity.get("activities", "RAS"),
+                            "results": "RAS",
+                            "perspectives": "RAS"
+                        })
+                else:
+                    # Default entry
+                    complete_activities.append({
+                        "actor": member,
+                        "dossier": "Non spécifié",
+                        "activities": "RAS",
+                        "results": "RAS",
+                        "perspectives": "RAS"
+                    })
+            
+            extracted_data["activities_review"] = complete_activities
+        
+        # Fill missing resolutions using historical data
+        resolutions = extracted_data.get("resolutions_summary", [])
+        if len(resolutions) == 0:
+            st.info("📋 Filling missing resolutions from historical memory...")
+            historical_resolutions = latest_meeting.get("resolutions_summary", [])
+            
+            # Get ongoing resolutions (status != "Exécuté")
+            ongoing_resolutions = []
+            for resolution in historical_resolutions:
+                if resolution.get("status", "") != "Exécuté":
+                    # Update date to current meeting
+                    updated_resolution = resolution.copy()
+                    updated_resolution["date"] = date
+                    ongoing_resolutions.append(updated_resolution)
+            
+            if ongoing_resolutions:
+                extracted_data["resolutions_summary"] = ongoing_resolutions
+                st.write(f"   • Carried forward {len(ongoing_resolutions)} ongoing resolutions")
+            else:
+                # Create default resolution entry
+                extracted_data["resolutions_summary"] = [{
+                    "date": date,
+                    "dossier": "Suivi général",
+                    "resolution": "Suivi des activités en cours selon perspectives définies",
+                    "responsible": "Tous les membres",
+                    "deadline": "Prochaine réunion",
+                    "execution_date": "",
+                    "status": "En cours"
+                }]
+        
+        # Fill start_time and end_time if missing
+        if extracted_data.get("start_time") == "Non spécifié":
+            # Try to use common meeting times or historical data
+            historical_start = latest_meeting.get("start_time", "Non spécifié")
+            if historical_start != "Non spécifié":
+                extracted_data["start_time"] = historical_start
+                st.write(f"   • Using historical start time: {historical_start}")
+            else:
+                extracted_data["start_time"] = "09h00min"  # Default meeting start time
+                st.write(f"   • Using default start time: 09h00min")
+        
+        if extracted_data.get("end_time") == "Non spécifié":
+            historical_end = latest_meeting.get("end_time", "Non spécifié")
+            if historical_end != "Non spécifié":
+                extracted_data["end_time"] = historical_end
+                st.write(f"   • Using historical end time: {historical_end}")
+            else:
+                # Calculate end time based on start time + typical meeting duration
+                try:
+                    start_time_str = extracted_data["start_time"].replace("h", ":").replace("min", "")
+                    if ":" not in start_time_str:
+                        start_time_str += ":00"
+                    start_time = datetime.strptime(start_time_str, "%H:%M")
+                    end_time = start_time + timedelta(hours=2)  # 2-hour default duration
+                    extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
+                    st.write(f"   • Calculated end time: {extracted_data['end_time']}")
+                except ValueError:
+                    extracted_data["end_time"] = "11h00min"  # Default end time
+                    st.write(f"   • Using default end time: 11h00min")
+        
+        return extracted_data
+        
+    except Exception as e:
+        st.warning(f"Error in smart historical data filling: {str(e)}")
+        return extracted_data
+
 def main():
     st.title("Meeting Transcription Tool")
     
@@ -1154,8 +1379,27 @@ def main():
         # Add warning about circular reference
         formatted_date = meeting_date.strftime("%d/%m/%Y")
         st.info(f"📅 Meeting date: {formatted_date}")
-        if os.path.exists("processed_meetings") and any(formatted_date.replace("/", "-") in f for f in os.listdir("processed_meetings") if f.endswith('.json')):
-            st.warning(f"⚠️ A meeting for {formatted_date} already exists in historical data. The system will exclude it from context to avoid circular reference.")
+        
+        # Check if meeting already exists and offer testing mode
+        meeting_exists = os.path.exists("processed_meetings") and any(formatted_date.replace("/", "-") in f for f in os.listdir("processed_meetings") if f.endswith('.json'))
+        
+        if meeting_exists:
+            st.warning(f"⚠️ A meeting for {formatted_date} already exists in historical data.")
+            
+            # Add option for testing perfect JSON generation
+            test_mode = st.checkbox(
+                "🧪 **Test Mode**: Use existing JSON as perfect data source",
+                help="Enable this to test document generation using the existing perfect JSON data. This allows circular reference for testing purposes."
+            )
+            
+            if test_mode:
+                st.success("✅ Test mode enabled! Will use existing JSON data to fill gaps for perfect document generation.")
+                st.session_state.test_mode = True
+            else:
+                st.info("📊 Normal mode: Will exclude existing meeting from context to avoid circular reference.")
+                st.session_state.test_mode = False
+        else:
+            st.session_state.test_mode = False
     
     with col2:
         st.header("Transcription & Résultat")
@@ -1177,8 +1421,15 @@ def main():
                         st.text_area("Transcription résultante", transcription, height=200)
                         
                         with st.spinner("Extraction des informations avec contexte historique..."):
+                            # Use test mode if enabled
+                            allow_circular = getattr(st.session_state, 'test_mode', False)
+                            if allow_circular:
+                                st.info("🧪 Test mode: Using existing JSON data for perfect generation")
+                            
                             extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""))
                             if extracted_info:
+                                # Apply smart historical filling with test mode
+                                extracted_info = smart_historical_data_filling(extracted_info, meeting_date.strftime("%d/%m/%Y"), allow_circular=allow_circular)
                                 st.session_state.extracted_info = extracted_info
                                 st.success("✅ Information extraction completed!")
                                 with st.expander("📋 View Extracted Information"):

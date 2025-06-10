@@ -402,9 +402,13 @@ Pay special attention to:
 
             # Define expected team members
             expected_members = [
-                "Grace Divine", "Vladimir Soua", "Gael Kiampi", "Emmanuel Teinga",
-                "Aristide Kamga", "Eric Nana", "Divine Kenmogne", "Christ Fotsing",
-                "Armand Tchoupou", "Brice Kamdem", "Ornela Tamo", "Joel Monthe"
+                "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
+                "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
+                "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
+                "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
+                "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
+                "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
+                "Charlène GHOMSI"
             ]
 
             # 1. Extract attendance with context
