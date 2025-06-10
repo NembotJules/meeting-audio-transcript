@@ -164,10 +164,135 @@ def try_fix_truncated_json(json_str: str) -> str:
         return json_str
 
 class MeetingProcessor:
-    def __init__(self, mistral_api_key: str, deepseek_api_key: str):
-        """Initialize with necessary API keys."""
+    def __init__(self, mistral_api_key: str, deepseek_api_key: str, context_dir: str = "processed_meetings"):
+        """Initialize with necessary API keys and context directory."""
         self.mistral_client = Mistral(api_key=mistral_api_key)
         self.deepseek_api_key = deepseek_api_key
+        self.context_dir = context_dir
+
+    def load_historical_context(self, max_meetings: int = 3) -> str:
+        """
+        Load the most recent historical meetings as context.
+        
+        Args:
+            max_meetings: Maximum number of meetings to include as context
+            
+        Returns:
+            Formatted context string for the LLM
+        """
+        try:
+            if not os.path.exists(self.context_dir):
+                print(f"Context directory {self.context_dir} not found")
+                return ""
+            
+            # Get all JSON files in the context directory
+            json_files = []
+            for file in os.listdir(self.context_dir):
+                if file.endswith('.json'):
+                    filepath = os.path.join(self.context_dir, file)
+                    # Get file modification time for sorting
+                    mtime = os.path.getmtime(filepath)
+                    json_files.append((mtime, filepath, file))
+            
+            if not json_files:
+                print("No historical meeting files found")
+                return ""
+            
+            # Sort by modification time (most recent first) and take the last max_meetings
+            json_files.sort(key=lambda x: x[0], reverse=True)
+            recent_files = json_files[:max_meetings]
+            
+            print(f"Loading {len(recent_files)} historical meetings as context:")
+            
+            context_parts = []
+            for mtime, filepath, filename in recent_files:
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        meeting_data = json.load(f)
+                    
+                    print(f"- {filename}")
+                    
+                    # Format this meeting's data for context
+                    context_parts.append(self.format_meeting_context(meeting_data))
+                    
+                except Exception as e:
+                    print(f"Error loading {filename}: {str(e)}")
+                    continue
+            
+            if context_parts:
+                full_context = "=== HISTORICAL MEETING CONTEXT ===\n\n" + "\n\n".join(context_parts)
+                print(f"Historical context loaded successfully ({len(full_context)} characters)")
+                return full_context
+            else:
+                return ""
+                
+        except Exception as e:
+            print(f"Error loading historical context: {str(e)}")
+            return ""
+
+    def format_meeting_context(self, meeting_data: Dict) -> str:
+        """
+        Format a single meeting's data for use as context.
+        
+        Args:
+            meeting_data: Meeting data dictionary
+            
+        Returns:
+            Formatted context string
+        """
+        try:
+            context = []
+            
+            # Meeting metadata
+            metadata = meeting_data.get("meeting_metadata", {})
+            context.append(f"Meeting Date: {metadata.get('date', 'Unknown')}")
+            context.append(f"Meeting Title: {metadata.get('title', 'Unknown')}")
+            
+            # Ongoing activities (focus on perspectives - what's planned for next)
+            activities = meeting_data.get("activities_review", [])
+            if activities:
+                context.append("\nOngoing Activities:")
+                for activity in activities[:10]:  # Limit to first 10 to avoid too much context
+                    actor = activity.get("actor", "Unknown")
+                    dossier = activity.get("dossier", "Unknown")
+                    perspectives = activity.get("perspectives", "")
+                    if perspectives and perspectives != "RAS":
+                        context.append(f"- {actor} ({dossier}): {perspectives}")
+            
+            # Pending resolutions
+            resolutions = meeting_data.get("resolutions_summary", [])
+            if resolutions:
+                context.append("\nResolutions from this meeting:")
+                for resolution in resolutions:
+                    responsible = resolution.get("responsible", "Unknown")
+                    deadline = resolution.get("deadline", "")
+                    resolution_text = resolution.get("resolution", "")
+                    status = resolution.get("status", "")
+                    if resolution_text:
+                        res_info = f"- {resolution_text} (Responsible: {responsible}"
+                        if deadline:
+                            res_info += f", Deadline: {deadline}"
+                        if status:
+                            res_info += f", Status: {status}"
+                        res_info += ")"
+                        context.append(res_info)
+            
+            # Previous sanctions (for reference)
+            sanctions = meeting_data.get("sanctions_summary", [])
+            if sanctions and any(s.get("name", "") != "Aucune" for s in sanctions):
+                context.append("\nSanctions from this meeting:")
+                for sanction in sanctions:
+                    name = sanction.get("name", "")
+                    reason = sanction.get("reason", "")
+                    amount = sanction.get("amount", "")
+                    if name != "Aucune" and name:
+                        context.append(f"- {name}: {reason} ({amount} FCFA)")
+            
+            return "\n".join(context)
+            
+        except Exception as e:
+            print(f"Error formatting meeting context: {str(e)}")
+            return f"Meeting Date: {meeting_data.get('meeting_metadata', {}).get('date', 'Unknown')}"
 
     def extract_text_from_document(self, file) -> str:
         """
@@ -225,7 +350,7 @@ class MeetingProcessor:
 
     def extract_structured_info(self, text: str, meeting_date: str, meeting_title: str) -> Dict:
         """
-        Extract structured information from text using LLM.
+        Extract structured information from text using LLM with historical context.
         
         Args:
             text: Extracted text from document
@@ -247,81 +372,114 @@ class MeetingProcessor:
                 return default_value
 
         try:
-            # 1. Extract attendance
-            attendance_prompt = f"""
-            Extract ONLY the attendance information from the meeting note.
-            Return as two lists in this EXACT format (no other text):
-            {{"present": ["name1", "name2"], "absent": ["name3", "name4"]}}
+            # Load historical context
+            historical_context = self.load_historical_context(max_meetings=3)
+            
+            # Create enhanced prompts with context
+            context_instruction = ""
+            if historical_context:
+                context_instruction = f"""
+IMPORTANT: Use the following historical context from previous meetings to inform your extraction. 
+Pay special attention to:
+- Ongoing activities and their progress
+- People mentioned in previous meetings
+- Pending resolutions and their status
+- Previous sanctions for reference
 
-            Meeting Note:
-            {text}
-            """
+{historical_context}
+
+=====================================
+"""
+
+            # 1. Extract attendance with context
+            attendance_prompt = f"""
+{context_instruction}
+Extract ONLY the attendance information from the meeting note.
+Consider people mentioned in the historical context above.
+Return as two lists in this EXACT format (no other text):
+{{"present": ["name1", "name2"], "absent": ["name3", "name4"]}}
+
+Meeting Note:
+{text}
+"""
             attendance_response = self._make_api_call(attendance_prompt)
             attendance_data = safe_parse_json(attendance_response, {"present": [], "absent": []})
 
-            # 2. Extract agenda items
+            # 2. Extract agenda items with context
             agenda_prompt = f"""
-            Extract ONLY the agenda items from the meeting note.
-            Return as a list in this EXACT format (no other text):
-            {{"agenda_items": ["item1", "item2", "item3"]}}
+{context_instruction}
+Extract ONLY the agenda items from the meeting note.
+Return as a list in this EXACT format (no other text):
+{{"agenda_items": ["item1", "item2", "item3"]}}
 
-            Meeting Note:
-            {text}
-            """
+Meeting Note:
+{text}
+"""
             agenda_response = self._make_api_call(agenda_prompt)
             agenda_data = safe_parse_json(agenda_response, {"agenda_items": []})
 
-            # 3. Extract activities review
+            # 3. Extract activities review with context (most important for continuity)
             activities_prompt = f"""
-            Extract ONLY the activities review from the meeting note.
-            Return as a list of objects in this EXACT format (no other text):
-            {{"activities_review": [
-                {{"actor": "name", "dossier": "text", "activities": "text", "results": "text", "perspectives": "text"}}
-            ]}}
+{context_instruction}
+Extract ONLY the activities review from the meeting note.
+IMPORTANT: Use the historical context to understand:
+- Which activities are continuing from previous meetings
+- Progress updates on ongoing projects
+- New activities vs continuing ones
 
-            Meeting Note:
-            {text}
-            """
+Return as a list of objects in this EXACT format (no other text):
+{{"activities_review": [
+    {{"actor": "name", "dossier": "text", "activities": "text", "results": "text", "perspectives": "text"}}
+]}}
+
+Meeting Note:
+{text}
+"""
             activities_response = self._make_api_call(activities_prompt)
             activities_data = safe_parse_json(activities_response, {"activities_review": []})
 
-            # 4. Extract resolutions
+            # 4. Extract resolutions with context
             resolutions_prompt = f"""
-            Extract ONLY the resolutions from the meeting note.
-            Return as a list of objects in this EXACT format (no other text):
-            {{"resolutions_summary": [
-                {{"date": "DD/MM/YYYY", "dossier": "text", "resolution": "text", "responsible": "name", "deadline": "DD/MM/YYYY", "status": "text"}}
-            ]}}
+{context_instruction}
+Extract ONLY the resolutions from the meeting note.
+Consider any previous resolutions that might be referenced or updated.
+Return as a list of objects in this EXACT format (no other text):
+{{"resolutions_summary": [
+    {{"date": "DD/MM/YYYY", "dossier": "text", "resolution": "text", "responsible": "name", "deadline": "DD/MM/YYYY", "status": "text"}}
+]}}
 
-            Meeting Note:
-            {text}
-            """
+Meeting Note:
+{text}
+"""
             resolutions_response = self._make_api_call(resolutions_prompt)
             resolutions_data = safe_parse_json(resolutions_response, {"resolutions_summary": []})
 
-            # 5. Extract sanctions
+            # 5. Extract sanctions with context
             sanctions_prompt = f"""
-            Extract ONLY the sanctions from the meeting note.
-            Return as a list of objects in this EXACT format (no other text):
-            {{"sanctions_summary": [
-                {{"name": "text", "reason": "text", "amount": number, "date": "DD/MM/YYYY", "status": "text"}}
-            ]}}
+{context_instruction}
+Extract ONLY the sanctions from the meeting note.
+Consider previous sanctions for reference and context.
+Return as a list of objects in this EXACT format (no other text):
+{{"sanctions_summary": [
+    {{"name": "text", "reason": "text", "amount": "number", "date": "DD/MM/YYYY", "status": "text"}}
+]}}
 
-            Meeting Note:
-            {text}
-            """
+Meeting Note:
+{text}
+"""
             sanctions_response = self._make_api_call(sanctions_prompt)
             sanctions_data = safe_parse_json(sanctions_response, {"sanctions_summary": []})
 
-            # 6. Extract miscellaneous items
+            # 6. Extract miscellaneous items with context
             misc_prompt = f"""
-            Extract ONLY miscellaneous items and key highlights from the meeting note.
-            Return in this EXACT format (no other text):
-            {{"key_highlights": ["item1", "item2"], "miscellaneous": ["item1", "item2"]}}
+{context_instruction}
+Extract ONLY miscellaneous items and key highlights from the meeting note.
+Return in this EXACT format (no other text):
+{{"key_highlights": ["item1", "item2"], "miscellaneous": ["item1", "item2"]}}
 
-            Meeting Note:
-            {text}
-            """
+Meeting Note:
+{text}
+"""
             misc_response = self._make_api_call(misc_prompt)
             misc_data = safe_parse_json(misc_response, {"key_highlights": [], "miscellaneous": []})
 

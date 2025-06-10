@@ -58,8 +58,14 @@ def main():
             else:
                 with st.spinner("Processing meeting note..."):
                     try:
-                        # Initialize processor
-                        processor = MeetingProcessor(mistral_api_key, deepseek_api_key)
+                        # Initialize processor with context directory
+                        processor = MeetingProcessor(
+                            mistral_api_key, 
+                            deepseek_api_key,
+                            context_dir="processed_meetings"  # Specify where historical JSONs are stored
+                        )
+                        
+                        st.info("Loading historical context from previous meetings...")
                         
                         # Process the document
                         extracted_data = processor.process_historical_meeting(
@@ -70,7 +76,7 @@ def main():
                         
                         # Store in session state
                         st.session_state.extracted_data = extracted_data
-                        st.success("Meeting note processed successfully!")
+                        st.success("Meeting note processed successfully with historical context!")
                         
                     except Exception as e:
                         st.error(f"Error processing meeting note: {str(e)}")
