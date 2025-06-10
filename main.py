@@ -957,45 +957,103 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         if rapporteur != "Non spécifié":
             add_styled_paragraph(doc, f"Rapporteur: {rapporteur}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
 
-        # Add attendance table
+        # Add attendance table with proper styling
         add_styled_paragraph(doc, "◆ LISTE DE PRÉSENCE", bold=True)
         if present_attendees or absent_attendees:
             max_rows = max(len(present_attendees), len(absent_attendees)) or 1
-            attendance_data = [[present_attendees[i] if i < len(present_attendees) else "", absent_attendees[i] if i < len(absent_attendees) else ""] for i in range(max_rows)]
-            add_styled_table(doc, max_rows + 1, 2, ["PRÉSENTS", "ABSENTS"], attendance_data, column_widths=[4.5, 4.5], table_width=9.0)
+            
+            # Create table for attendance
+            attendance_table = doc.add_table(rows=max_rows + 1, cols=2)
+            try:
+                attendance_table.style = "Table Grid"
+            except KeyError:
+                pass
+            
+            set_table_width(attendance_table, 9.0)
+            set_column_widths(attendance_table, [4.5, 4.5])
+            
+            # Add headers with red background
+            headers = [f"Présents ({len(present_attendees)})", f"Absents ({len(absent_attendees)})"]
+            for j, header in enumerate(headers):
+                cell = attendance_table.cell(0, j)
+                cell.text = header
+                run = cell.paragraphs[0].runs[0]
+                run.font.name = "Century"
+                run.font.size = Pt(12)
+                run.font.bold = True
+                run.font.color.rgb = RGBColor(255, 255, 255)
+                set_cell_background(cell, (200, 0, 0))  # Red background
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            # Add data rows with alternating colors
+            attendance_data = [[present_attendees[i] if i < len(present_attendees) else "", 
+                              absent_attendees[i] if i < len(absent_attendees) else ""] for i in range(max_rows)]
+            
+            for i, row_data in enumerate(attendance_data):
+                row = attendance_table.rows[i + 1]
+                
+                # Add alternating row colors
+                if i % 2 == 0:
+                    row_color = (240, 240, 240)  # Light gray
+                else:
+                    row_color = (255, 255, 255)  # White
+                
+                for j, cell_text in enumerate(row_data):
+                    cell = row.cells[j]
+                    cell.text = cell_text
+                    run = cell.paragraphs[0].runs[0]
+                    run.font.name = "Century"
+                    run.font.size = Pt(11)
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                    set_cell_background(cell, row_color)
         else:
             add_styled_paragraph(doc, "Aucune présence spécifiée.")
 
         doc.add_page_break()
 
-        # Add agenda (guaranteed to be in French)
-        add_styled_paragraph(doc, "◆ Ordre du jour", bold=True)
+        # Add agenda with improved styling
+        add_styled_paragraph(doc, "ORDRE DU JOUR :", bold=True, font_size=14, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+        doc.add_paragraph()  # Add spacing
+        
         if agenda_list:
             for item in agenda_list:
-                add_styled_paragraph(doc, item)
+                # Clean formatting for agenda items
+                p = doc.add_paragraph()
+                p.style = 'List Number'
+                run = p.add_run(item)
+                run.font.name = "Century"
+                run.font.size = Pt(12)
         else:
             # Fallback to French defaults
             french_agenda = [
-                "I- Relecture du Compte Rendu",
-                "II- Récapitulatif des Résolutions et des Sanctions",
-                "III- Revue d'activités", 
-                "IV- Faits Saillants",
-                "V- Divers"
+                "Relecture du compte rendu et adoption",
+                "Récapitulatif des résolutions et sanctions",
+                "Revue d'activités",
+                "Faits saillants",
+                "Divers"
             ]
-            for item in french_agenda:
-                add_styled_paragraph(doc, item)
+            for i, item in enumerate(french_agenda, 1):
+                p = doc.add_paragraph()
+                p.style = 'List Number'
+                
+                # Add Roman numeral
+                roman_num = ["I", "II", "III", "IV", "V"][i-1]
+                run = p.add_run(f"{roman_num}- {item}")
+                run.font.name = "Century"
+                run.font.size = Pt(12)
 
         doc.add_page_break()
 
-        # Add activities review (organized by department with headers)
-        raw_activities = extracted_info.get("activities_review", [])
-        organized_activities = organize_activities_by_department(raw_activities)
+        # Add section I header
+        add_styled_paragraph(doc, "I. Relecture du Compte-rendu", bold=True, font_size=14, color=RGBColor(0, 0, 0))
+        add_styled_paragraph(doc, "Le compte rendu précédent n'a pas été adopté et validé.", font_size=12)
+        doc.add_paragraph()  # Add spacing
         
-        st.info(f"📊 Generating activity table organized by departments: {len([a for a in organized_activities if a.get('type') == 'activity'])} activities across {len([a for a in organized_activities if a.get('type') == 'header'])} departments")
+        # Add section II header  
+        add_styled_paragraph(doc, "II. Récapitulatif des résolutions et sanctions", bold=True, font_size=14, color=RGBColor(0, 0, 0))
+        add_styled_paragraph(doc, "Les tableaux des résolutions et des sanctions ont été examinés et mis à jour.", font_size=12)
         
-        add_styled_paragraph(doc, "REVUE DES ACTIVITÉS", bold=True, color=RGBColor(192, 0, 0))
-        add_activities_table_with_departments(doc, organized_activities)
-
         # Add resolutions (guaranteed to have at least one entry)
         resolutions = extracted_info.get("resolutions_summary", [])
         st.info(f"📊 Generating resolutions table with {len(resolutions)} entries")
@@ -1011,6 +1069,20 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         add_styled_paragraph(doc, "RÉCAPITULATIF DES SANCTIONS", bold=True, color=RGBColor(192, 0, 0))
         sanctions_data = [[s.get("name", ""), s.get("reason", ""), str(s.get("amount", "")), s.get("date", ""), s.get("status", "")] for s in sanctions]
         add_styled_table(doc, len(sanctions) + 1, 5, ["NOM", "RAISON", "MONTANT (FCFA)", "DATE", "STATUT"], sanctions_data, column_widths=[2.0, 2.5, 2.0, 1.8, 2.2], table_width=10.5)
+
+        doc.add_page_break()
+        
+        # Add section III header
+        add_styled_paragraph(doc, "III. Revue d'activités", bold=True, font_size=14, color=RGBColor(0, 0, 0))
+        doc.add_paragraph()  # Add spacing
+
+        # Add activities review (organized by department with headers)
+        raw_activities = extracted_info.get("activities_review", [])
+        organized_activities = organize_activities_by_department(raw_activities)
+        
+        st.info(f"📊 Generating activity table organized by departments: {len([a for a in organized_activities if a.get('type') == 'activity'])} activities across {len([a for a in organized_activities if a.get('type') == 'header'])} departments")
+        
+        add_activities_table_with_departments(doc, organized_activities)
 
         # Add balance
         add_styled_paragraph(doc, f"Solde du compte de solidarité DRI (00001-00921711101-10) est de XAF {extracted_info.get('balance_amount', 'Non spécifié')} au {extracted_info.get('balance_date', '')}.")
@@ -1625,6 +1697,109 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
     
     return table
 
+def show_meeting_guidance():
+    """Display comprehensive meeting guidance for better transcription and data extraction."""
+    with st.sidebar.expander("📋 Meeting Structure Guide", expanded=False):
+        st.markdown("""
+        ### 🎯 For Better Data Extraction
+        
+        **📢 Meeting Opening (Speaker should say):**
+        ```
+        "Bonjour, nous commençons la réunion à [HEURE]
+        Présents: [List all present members clearly]
+        Absents: [List absent members with reasons]
+        Rapporteur: [Name]
+        Président: [Name]"
+        ```
+        
+        **📋 Activity Review Structure:**
+        ```
+        Department by department:
+        "DEPARTEMENT INVESTISSEMENT:
+        - Grace Divine: Dossier [NAME], Activités [DETAILS], 
+          Résultats [DETAILS], Perspectives [DETAILS]
+        - Vladimir SOUA: ..."
+        ```
+        
+        **📜 Resolutions (Speaker should say):**
+        ```
+        "RESOLUTION: [Clear description]
+        Responsable: [Person name]
+        Échéance: [Date DD/MM/YYYY]
+        Statut: En cours/Exécuté"
+        ```
+        
+        **💰 Sanctions (If any):**
+        ```
+        "SANCTION: [Person] pour [Reason] 
+        Montant: [Amount] FCFA
+        Date: [DD/MM/YYYY]"
+        ```
+        
+        **⏰ Meeting End:**
+        ```
+        "La réunion se termine à [HEURE]
+        Solde du compte: [Amount] FCFA au [Date]"
+        ```
+        """)
+
+    with st.sidebar.expander("🎙️ Audio Quality Tips", expanded=False):
+        st.markdown("""
+        ### 🔊 Recording Best Practices
+        
+        **Before Meeting:**
+        - Use good microphone (not laptop mic)
+        - Test audio levels
+        - Quiet room, minimal background noise
+        - Position mic centrally
+        
+        **During Meeting:**
+        - Speak clearly and slowly
+        - State your name before speaking
+        - Pause between topics
+        - Repeat important information
+        - Spell out complex terms
+        
+        **For Virtual Meetings:**
+        - Use "Record" feature in Teams/Zoom
+        - Ask participants to mute when not speaking
+        - Use headphones to reduce echo
+        - Enable auto-transcription if available
+        
+        **Post-Meeting:**
+        - Review transcript before uploading
+        - Fix obvious errors manually
+        - Add missing speaker names
+        - Clarify unclear sections
+        """)
+
+    with st.sidebar.expander("🏗️ Meeting Template", expanded=False):
+        st.markdown("""
+        ### 📝 Suggested Meeting Flow
+        
+        **1. Opening (5 min)**
+        - Time, attendance, roles
+        
+        **2. Previous Minutes Review (10 min)**
+        - Quick validation
+        
+        **3. Resolutions & Sanctions Review (10 min)**
+        - Update status of previous items
+        
+        **4. Activity Review by Department (30 min)**
+        - INVESTISSEMENT → PROJET → IA → INNOVATION → ETUDE
+        - Each person: Dossier, Activities, Results, Perspectives
+        
+        **5. Key Highlights (10 min)**
+        - Important announcements
+        
+        **6. Miscellaneous (10 min)**
+        - Other topics
+        
+        **7. Closing (5 min)**
+        - End time, account balance
+        """)
+
 def main():
     st.title("Meeting Transcription Tool")
     
@@ -1635,6 +1810,9 @@ def main():
     
     # Show transcript quality tips
     show_transcript_quality_tips()
+    
+    # Show meeting guidance for better data extraction
+    show_meeting_guidance()
     
     # Show historical context information
     st.sidebar.header("📊 Historical Context")
