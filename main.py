@@ -953,6 +953,11 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         
         add_styled_paragraph(doc, f"Heure de début: {extracted_info.get('start_time', 'Non spécifié')}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
         add_styled_paragraph(doc, f"Heure de fin: {extracted_info.get('end_time', 'Non spécifié')}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+        
+        # Debug: Check if times are being extracted
+        st.info(f"🕐 Start time: {extracted_info.get('start_time', 'Non spécifié')}")
+        st.info(f"🕕 End time: {extracted_info.get('end_time', 'Non spécifié')}")
+        
         rapporteur = extracted_info.get("rapporteur", "Non spécifié")
         if rapporteur != "Non spécifié":
             add_styled_paragraph(doc, f"Rapporteur: {rapporteur}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
@@ -1054,6 +1059,9 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         add_styled_paragraph(doc, "II. Récapitulatif des résolutions et sanctions", bold=True, font_size=14, color=RGBColor(0, 0, 0))
         add_styled_paragraph(doc, "Les tableaux des résolutions et des sanctions ont été examinés et mis à jour.", font_size=12)
         doc.add_paragraph()  # Add spacing
+
+        # PAGE BREAK HERE - so Section III starts on new page
+        doc.add_page_break()
         
         # Add section III header - Activity Review FIRST
         add_styled_paragraph(doc, "III. Revue d'activités", bold=True, font_size=14, color=RGBColor(0, 0, 0))
@@ -1606,7 +1614,7 @@ def organize_activities_by_department(activities_list):
     
     return organized_activities
 
-def add_activities_table_with_departments(doc, organized_activities, table_width=12.0):  # Increased from 10.5
+def add_activities_table_with_departments(doc, organized_activities, table_width=14.0):  # Increased from 12.0
     """Add activities table with department headers and proper styling."""
     if not organized_activities:
         return None
@@ -1646,9 +1654,9 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
         pass  # Use default style if Table Grid not available
     
     set_table_width(table, table_width)
-    # Increased column widths - adjust these values to make columns wider/narrower:
+    # Significantly increased column widths:
     # [Actor, Dossier, Activities, Results, Perspectives]
-    set_column_widths(table, [2.5, 2.5, 3.5, 2.5, 2.5])  # Total = 13.5 inches
+    set_column_widths(table, [3.0, 3.0, 4.0, 3.0, 3.0])  # Total = 16.0 inches
     
     # Add main header row
     headers = ["ACTEURS", "DOSSIERS", "ACTIVITÉS", "RÉSULTATS", "PERSPECTIVES"]
@@ -1667,22 +1675,7 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
     # Add data rows
     current_row = 1
     current_department = None
-    
-    # Pre-process to identify rows that need merging for person names
-    person_row_spans = {}  # {person_name: [start_row, end_row]}
-    temp_row = 1
-    
-    for item in organized_activities:
-        if item.get("type") == "header":
-            temp_row += 1
-        else:
-            actor = item.get("actor", "").strip()
-            if actor:  # Only for rows with person names
-                if actor not in person_row_spans:
-                    person_row_spans[actor] = [temp_row, temp_row]
-                else:
-                    person_row_spans[actor][1] = temp_row  # Update end row
-            temp_row += 1
+    person_first_row = {}  # Track first row for each person
     
     for item in organized_activities:
         row = table.rows[current_row]
@@ -1713,8 +1706,13 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
         else:
             # Regular activity row
             actor = item.get("actor", "").strip()
+            
+            # Track first occurrence of each person
+            if actor and actor not in person_first_row:
+                person_first_row[actor] = current_row
+            
             data = [
-                actor,  # Always include actor name for now, we'll merge later
+                actor if actor not in person_first_row or person_first_row[actor] == current_row else "",  # Only show name on first row
                 item.get("dossier", ""),
                 item.get("activities", ""),
                 item.get("results", ""),
@@ -1727,6 +1725,11 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
                 run = cell.paragraphs[0].runs[0]
                 run.font.name = "Century"
                 run.font.size = Pt(12)
+                
+                # Make person names bold
+                if j == 0 and cell_text:  # Actor column with text
+                    run.font.bold = True
+                
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 
                 # Set department row color (lighter version of department color)
@@ -1740,28 +1743,45 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
         
         current_row += 1
     
-    # Now merge person name cells vertically for people with multiple dossiers
-    for person, (start_row, end_row) in person_row_spans.items():
-        if end_row > start_row:  # Person has multiple rows
+    # Post-process: Merge actor cells for people with multiple dossiers
+    person_rows = {}  # {person: [list of row numbers]}
+    current_row = 1
+    
+    for item in organized_activities:
+        if item.get("type") != "header":
+            actor = item.get("actor", "").strip()
+            if actor:
+                if actor not in person_rows:
+                    person_rows[actor] = []
+                person_rows[actor].append(current_row)
+        current_row += 1
+    
+    # Merge cells for people with multiple rows
+    for person, rows in person_rows.items():
+        if len(rows) > 1:  # Person has multiple dossiers
             try:
-                # Merge the actor column (column 0) from start_row to end_row
-                start_cell = table.cell(start_row, 0)
-                for merge_row in range(start_row + 1, end_row + 1):
-                    end_cell = table.cell(merge_row, 0)
-                    start_cell.merge(end_cell)
+                # Find the first and last row for this person
+                start_row = min(rows)
+                end_row = max(rows)
                 
-                # Set the merged cell text and clear duplicate text
+                # Merge all actor cells for this person
+                start_cell = table.cell(start_row, 0)
+                for row_idx in range(start_row + 1, end_row + 1):
+                    if row_idx in rows:  # Only merge rows that belong to this person
+                        merge_cell = table.cell(row_idx, 0)
+                        start_cell.merge(merge_cell)
+                
+                # Set the text and formatting for the merged cell
                 start_cell.text = person
                 run = start_cell.paragraphs[0].runs[0]
                 run.font.name = "Century"
                 run.font.size = Pt(12)
-                run.font.bold = True  # Make person names bold
+                run.font.bold = True
                 start_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 start_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 
             except Exception as e:
-                # If merging fails, continue without merging
-                print(f"Could not merge cells for {person}: {e}")
+                st.warning(f"Could not merge cells for {person}: {e}")
                 continue
     
     return table
@@ -1873,21 +1893,21 @@ def main():
     """
     QUICK TABLE WIDTH ADJUSTMENTS:
     
-    To make activity table columns wider/narrower, edit line ~1632 in add_activities_table_with_departments():
-    set_column_widths(table, [2.5, 2.5, 3.5, 2.5, 2.5])
+    To make activity table columns wider/narrower, edit line ~1629 in add_activities_table_with_departments():
+    set_column_widths(table, [3.0, 3.0, 4.0, 3.0, 3.0])
                              ^^^^  ^^^^  ^^^^  ^^^^  ^^^^
                              Actor Doss  Act   Res   Pers
     
     - Increase numbers to make columns wider
     - Decrease numbers to make columns narrower  
-    - Total should be close to table_width (currently 12.0 inches)
+    - Total should be close to table_width (currently 14.0 inches)
     
-    Current settings:
-    - Actor: 2.5 inches
-    - Dossier: 2.5 inches  
-    - Activities: 3.5 inches (widest)
-    - Results: 2.5 inches
-    - Perspectives: 2.5 inches
+    Current settings (MUCH WIDER):
+    - Actor: 3.0 inches
+    - Dossier: 3.0 inches  
+    - Activities: 4.0 inches (widest)
+    - Results: 3.0 inches
+    - Perspectives: 3.0 inches
     """
     st.title("Meeting Transcription Tool")
     
