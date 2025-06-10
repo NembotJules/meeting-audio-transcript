@@ -219,7 +219,7 @@ def clean_json_response(response):
 
 def extract_info_fallback(transcription, meeting_title, date, previous_context=""):
     """Fallback function to extract information using improved string parsing and regex."""
-    # Use the new structure matching historical processor
+    # Use the new structure matching historical processor with proper French defaults
     extracted_data = {
         "meeting_metadata": {
             "date": date,
@@ -230,10 +230,10 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             "absent": []
         },
         "agenda_items": [
-            "I- Relecture du compte rendu et adoption",
-            "II- Récapitulatif des résolutions et sanctions", 
+            "I- Relecture du Compte Rendu",
+            "II- Récapitulatif des Résolutions et des Sanctions", 
             "III- Revue d'activités",
-            "IV- Faits saillants",
+            "IV- Faits Saillants",
             "V- Divers"
         ],
         "activities_review": [],
@@ -249,6 +249,13 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         "balance_amount": "Non spécifié",
         "balance_date": date
     }
+
+    # Define expected team members (add/modify as needed)
+    expected_members = [
+        "Grace Divine", "Vladimir Soua", "Gael Kiampi", "Emmanuel Teinga",
+        "Aristide Kamga", "Eric Nana", "Divine Kenmogne", "Christ Fotsing",
+        "Armand Tchoupou", "Brice Kamdem", "Ornela Tamo", "Joel Monthe"
+    ]
 
     # Extract presence list
     present_match = re.search(r"(Présents|Présent|Présentes|Présente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
@@ -266,12 +273,13 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             extracted_data["attendance"]["present"] = names
             extracted_data["attendance"]["absent"] = []
 
-    # Extract agenda items
+    # Extract agenda items - only if explicitly mentioned, otherwise keep defaults
     agenda_match = re.search(r"(Ordre du jour|Agenda)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
     if agenda_match:
         agenda_items = agenda_match.group(2).strip()
-        items = [item.strip() for item in agenda_items.split("\n") if item.strip()]
-        if items:
+        # Only replace default if we have clear agenda items
+        items = [item.strip() for item in agenda_items.split("\n") if item.strip() and len(item.strip()) > 5]
+        if items and len(items) >= 3:  # Only if we have substantial agenda items
             numbered_items = []
             for idx, item in enumerate(items, 1):
                 if not re.match(r"^[IVXLC]+\-", item):
@@ -319,8 +327,10 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
     if balance_date_match:
         extracted_data["balance_date"] = balance_date_match.group(2)
 
-    # Extract activities review
+    # Extract activities review - ensure ALL expected members have entries
     activities_section = re.search(r"(Revue des activités|Activités de la semaine)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
+    mentioned_activities = {}
+    
     if activities_section:
         activities_text = activities_section.group(2).strip()
         activities_lines = [line.strip() for line in activities_text.split("\n") if line.strip()]
@@ -330,18 +340,29 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             activities_match = re.search(r"(?:activités|menées) ([A-Za-z\s,]+)", line, re.IGNORECASE)
             results_match = re.search(r"(?:résultat|obtenu) ([A-Za-z\s,]+)", line, re.IGNORECASE)
             perspectives_match = re.search(r"(?:perspectives|prévoit de) ([A-Za-z\s,]+)", line, re.IGNORECASE)
-            actor = actor_match.group(1) if actor_match else "Non spécifié"
-            dossier = dossier_match.group(1).strip() if dossier_match else "Non spécifié"
-            activities_desc = activities_match.group(1).strip() if activities_match else "Non spécifié"
-            results = results_match.group(1).strip() if results_match else "Non spécifié"
-            perspectives = perspectives_match.group(1).strip() if perspectives_match else "Non spécifié"
+            
+            if actor_match:
+                actor = actor_match.group(1) if actor_match.group(1) else actor_match.group(0)
+                mentioned_activities[actor] = {
+                    "actor": actor,
+                    "dossier": dossier_match.group(1).strip() if dossier_match else "Non spécifié",
+                    "activities": activities_match.group(1).strip() if activities_match else "Non spécifié",
+                    "results": results_match.group(1).strip() if results_match else "Non spécifié",
+                    "perspectives": perspectives_match.group(1).strip() if perspectives_match else "Non spécifié"
+                }
+    
+    # Ensure ALL expected members have activity entries
+    for member in expected_members:
+        if member not in mentioned_activities:
             extracted_data["activities_review"].append({
-                "actor": actor,
-                "dossier": dossier,
-                "activities": activities_desc,
-                "results": results,
-                "perspectives": perspectives
+                "actor": member,
+                "dossier": "Non spécifié",
+                "activities": "RAS",
+                "results": "RAS", 
+                "perspectives": "RAS"
             })
+        else:
+            extracted_data["activities_review"].append(mentioned_activities[member])
 
     # Extract resolutions
     resolution_section = re.search(r"(Résolution|Resolutions)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
@@ -401,8 +422,8 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             "status": "Non appliquée"
         }]
 
-    # Apply missing data from history
-    historical_meetings = load_historical_meetings()
+    # Apply missing data from history (excluding current meeting)
+    historical_meetings = load_historical_meetings(exclude_date=date)
     extracted_data = get_missing_data_from_history(extracted_data, historical_meetings)
 
     return extracted_data
@@ -415,8 +436,8 @@ def to_roman(num):
     }
     return roman_numerals.get(num, str(num))
 
-def load_historical_meetings(context_dir="processed_meetings", max_meetings=3):
-    """Load the most recent historical meetings for context and missing data."""
+def load_historical_meetings(context_dir="processed_meetings", max_meetings=3, exclude_date=None):
+    """Load the most recent historical meetings for context and missing data, excluding current meeting date."""
     try:
         if not os.path.exists(context_dir):
             return []
@@ -426,6 +447,15 @@ def load_historical_meetings(context_dir="processed_meetings", max_meetings=3):
         for file in os.listdir(context_dir):
             if file.endswith('.json'):
                 filepath = os.path.join(context_dir, file)
+                
+                # Skip files that match the current meeting date to avoid circular context
+                if exclude_date:
+                    # Check if filename contains the exclude_date
+                    exclude_date_formatted = exclude_date.replace("/", "-")
+                    if exclude_date_formatted in file:
+                        st.info(f"🚫 Excluding current meeting {file} from historical context to avoid circular reference")
+                        continue
+                
                 # Get file modification time for sorting
                 mtime = os.path.getmtime(filepath)
                 json_files.append((mtime, filepath, file))
@@ -511,8 +541,8 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     if not transcription or not deepseek_api_key:
         return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
-    # Load historical meetings for context
-    historical_meetings = load_historical_meetings()
+    # Load historical meetings for context (excluding current meeting to avoid circular reference)
+    historical_meetings = load_historical_meetings(exclude_date=date)
     
     # Create comprehensive historical context with full JSON content
     historical_context = ""
@@ -570,7 +600,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             
             historical_context += "\n" + "="*60 + "\n\n"
 
-    # Create a structured prompt matching historical processor format
+    # Create a structured prompt matching historical processor format with proper French defaults
     prompt = f"""
     You are extracting information from a meeting transcript. Use the historical context below to understand continuity and ongoing items.
 
@@ -585,11 +615,24 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     Meeting Date: {date}
     Meeting Title: {meeting_title}
 
-    IMPORTANT INSTRUCTIONS:
-    1. If the current transcript mentions ongoing sanctions or doesn't specify new sanctions, use the sanctions from the historical context with updated dates.
-    2. For activities, check if they continue from previous meeting perspectives.
-    3. For resolutions, check if they reference previous resolutions.
-    4. Maintain continuity with historical data where appropriate.
+    IMPORTANT EXTRACTION RULES:
+    1. AGENDA ITEMS: Unless the transcript explicitly mentions different agenda items, use these French defaults:
+       - "I- Relecture du Compte Rendu"
+       - "II- Récapitulatif des Résolutions et des Sanctions"
+       - "III- Revue d'activités"
+       - "IV- Faits Saillants"
+       - "V- Divers"
+    
+    2. ACTIVITIES REVIEW: Create entries for ALL team members, not just those mentioned:
+       - Grace Divine, Vladimir Soua, Gael Kiampi, Emmanuel Teinga
+       - Aristide Kamga, Eric Nana, Divine Kenmogne, Christ Fotsing
+       - Armand Tchoupou, Brice Kamdem, Ornela Tamo, Joel Monthe
+       - If not mentioned, use "RAS" for activities, results, and perspectives
+    
+    3. If the current transcript mentions ongoing sanctions or doesn't specify new sanctions, use the sanctions from the historical context with updated dates.
+    4. For activities, check if they continue from previous meeting perspectives.
+    5. For resolutions, check if they reference previous resolutions.
+    6. Maintain continuity with historical data where appropriate.
 
     Extract the following information and return as JSON in this EXACT structure:
     {{
@@ -601,7 +644,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             "present": ["list of present attendees"],
             "absent": ["list of absent attendees"]
         }},
-        "agenda_items": ["agenda item 1", "agenda item 2"],
+        "agenda_items": ["I- Relecture du Compte Rendu", "II- Récapitulatif des Résolutions et des Sanctions", "III- Revue d'activités", "IV- Faits Saillants", "V- Divers"],
         "activities_review": [
             {{
                 "actor": "person name",
@@ -675,7 +718,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             st.error(f"API error: {extracted_data['error']}. Falling back.")
             return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
-        # Fill in missing data from historical meetings (as a backup)
+        # Fill in missing data from historical meetings (as a backup) - excluding current meeting
         extracted_data = get_missing_data_from_history(extracted_data, historical_meetings)
 
         # Add meeting metadata if not present
@@ -793,6 +836,9 @@ def add_text_in_box(doc, text, bg_color=(192, 192, 192), font_size=14, box_width
 def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date):
     """Build the Word document from scratch using the new JSON structure."""
     try:
+        # Ensure complete member data and proper structure
+        extracted_info = ensure_complete_member_data(extracted_info)
+        
         doc = Document()
 
         # Handle new structure - attendance is now a dict with present/absent arrays
@@ -808,7 +854,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
                     present_attendees[i] = f"{attendee} (Président)"
                     break
 
-        # Handle agenda items - should be a list now
+        # Handle agenda items - should be a list now (guaranteed to be French)
         agenda_items = extracted_info.get("agenda_items", [])
         if isinstance(agenda_items, str):
             # Fallback for old format
@@ -842,40 +888,44 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
 
         doc.add_page_break()
 
-        # Add agenda
+        # Add agenda (guaranteed to be in French)
         add_styled_paragraph(doc, "◆ Ordre du jour", bold=True)
         if agenda_list:
             for item in agenda_list:
                 add_styled_paragraph(doc, item)
         else:
-            add_styled_paragraph(doc, "Aucun point à l'ordre du jour spécifié.")
+            # Fallback to French defaults
+            french_agenda = [
+                "I- Relecture du Compte Rendu",
+                "II- Récapitulatif des Résolutions et des Sanctions",
+                "III- Revue d'activités", 
+                "IV- Faits Saillants",
+                "V- Divers"
+            ]
+            for item in french_agenda:
+                add_styled_paragraph(doc, item)
 
         doc.add_page_break()
 
-        # Add activities review
+        # Add activities review (guaranteed to have ALL members)
         activities = extracted_info.get("activities_review", [])
-        if not activities:
-            activities = [{"actor": "Non spécifié", "dossier": "Non spécifié", "activities": "Non spécifié", "results": "Non spécifié", "perspectives": "Non spécifié"}]
+        st.info(f"📊 Generating activity table with {len(activities)} members")
         
         add_styled_paragraph(doc, "REVUE DES ACTIVITÉS", bold=True, color=RGBColor(192, 0, 0))
         activities_data = [[a.get("actor", ""), a.get("dossier", ""), a.get("activities", ""), a.get("results", ""), a.get("perspectives", "")] for a in activities]
         add_styled_table(doc, len(activities) + 1, 5, ["ACTEURS", "DOSSIERS", "ACTIVITÉS", "RÉSULTATS", "PERSPECTIVES"], activities_data, column_widths=[2.0, 2.0, 2.5, 2.0, 2.0], table_width=10.5)
 
-        # Add resolutions
+        # Add resolutions (guaranteed to have at least one entry)
         resolutions = extracted_info.get("resolutions_summary", [])
-        if not resolutions:
-            current_date = meeting_metadata.get("date", extracted_info.get("date", ""))
-            resolutions = [{"date": current_date, "dossier": "Non spécifié", "resolution": "Non spécifié", "responsible": "Non spécifié", "deadline": "Non spécifié", "execution_date": "", "status": "En cours"}]
+        st.info(f"📊 Generating resolutions table with {len(resolutions)} entries")
         
         add_styled_paragraph(doc, "RÉCAPITULATIF DES RÉSOLUTIONS", bold=True, color=RGBColor(192, 0, 0))
         resolutions_data = [[r.get("date", ""), r.get("dossier", ""), r.get("resolution", ""), r.get("responsible", ""), r.get("deadline", ""), r.get("execution_date", ""), r.get("status", ""), str(r.get("report_count", "0"))] for r in resolutions]
         add_styled_table(doc, len(resolutions) + 1, 8, ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"], resolutions_data, column_widths=[1.5, 1.8, 2.5, 1.2, 1.8, 1.5, 1.2, 1.5], table_width=12.0)
 
-        # Add sanctions
+        # Add sanctions (guaranteed to have at least one entry)
         sanctions = extracted_info.get("sanctions_summary", [])
-        if not sanctions:
-            current_date = meeting_metadata.get("date", extracted_info.get("date", ""))
-            sanctions = [{"name": "Aucune", "reason": "Aucune sanction mentionnée", "amount": "0", "date": current_date, "status": "Non appliquée"}]
+        st.info(f"📊 Generating sanctions table with {len(sanctions)} entries")
         
         add_styled_paragraph(doc, "RÉCAPITULATIF DES SANCTIONS", bold=True, color=RGBColor(192, 0, 0))
         sanctions_data = [[s.get("name", ""), s.get("reason", ""), str(s.get("amount", "")), s.get("date", ""), s.get("status", "")] for s in sanctions]
@@ -896,6 +946,135 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         st.error(f"Error generating document: {e}")
         return None
 
+def ensure_complete_member_data(extracted_info):
+    """Ensure all expected members have complete activity entries and other tables are properly filled."""
+    
+    # Define expected team members
+    expected_members = [
+        "Grace Divine", "Vladimir Soua", "Gael Kiampi", "Emmanuel Teinga",
+        "Aristide Kamga", "Eric Nana", "Divine Kenmogne", "Christ Fotsing", 
+        "Armand Tchoupou", "Brice Kamdem", "Ornela Tamo", "Joel Monthe"
+    ]
+    
+    # Ensure activities_review has all members
+    existing_actors = {activity.get("actor", "") for activity in extracted_info.get("activities_review", [])}
+    
+    # Rebuild activities with all members
+    complete_activities = []
+    
+    # Add existing activities
+    for activity in extracted_info.get("activities_review", []):
+        if activity.get("actor") in expected_members:
+            complete_activities.append(activity)
+    
+    # Add missing members
+    for member in expected_members:
+        if member not in existing_actors:
+            complete_activities.append({
+                "actor": member,
+                "dossier": "Non spécifié",
+                "activities": "RAS",
+                "results": "RAS",
+                "perspectives": "RAS"
+            })
+    
+    # Sort by expected order
+    sorted_activities = []
+    for member in expected_members:
+        for activity in complete_activities:
+            if activity.get("actor") == member:
+                sorted_activities.append(activity)
+                break
+    
+    extracted_info["activities_review"] = sorted_activities
+    
+    # Ensure resolutions_summary has at least one entry
+    if not extracted_info.get("resolutions_summary"):
+        extracted_info["resolutions_summary"] = [{
+            "date": extracted_info["meeting_metadata"]["date"],
+            "dossier": "Non spécifié",
+            "resolution": "Aucune résolution spécifique mentionnée",
+            "responsible": "Non spécifié",
+            "deadline": "Non spécifié",
+            "execution_date": "",
+            "status": "En cours"
+        }]
+    
+    # Ensure sanctions_summary has at least one entry
+    if not extracted_info.get("sanctions_summary") or all(s.get("name") == "Aucune" for s in extracted_info.get("sanctions_summary", [])):
+        # Try to load from historical context if available
+        historical_meetings = load_historical_meetings(exclude_date=extracted_info["meeting_metadata"]["date"])
+        sanctions_found = False
+        
+        if historical_meetings:
+            for meeting in historical_meetings:
+                sanctions = meeting.get("sanctions_summary", [])
+                real_sanctions = [s for s in sanctions if s.get("name", "") not in ["Aucune", "", "Non spécifié"]]
+                if real_sanctions:
+                    # Update dates and carry forward sanctions
+                    updated_sanctions = []
+                    for sanction in real_sanctions:
+                        updated_sanction = sanction.copy()
+                        updated_sanction["date"] = extracted_info["meeting_metadata"]["date"]
+                        updated_sanctions.append(updated_sanction)
+                    extracted_info["sanctions_summary"] = updated_sanctions
+                    sanctions_found = True
+                    st.info(f"📋 Carried forward {len(updated_sanctions)} sanctions from historical meeting")
+                    break
+        
+        # If no historical sanctions, keep default
+        if not sanctions_found:
+            extracted_info["sanctions_summary"] = [{
+                "name": "Aucune",
+                "reason": "Aucune sanction mentionnée", 
+                "amount": "0",
+                "date": extracted_info["meeting_metadata"]["date"],
+                "status": "Non appliquée"
+            }]
+    
+    # Ensure agenda items are in French
+    if not extracted_info.get("agenda_items") or any("english" in item.lower() for item in extracted_info.get("agenda_items", [])):
+        extracted_info["agenda_items"] = [
+            "I- Relecture du Compte Rendu",
+            "II- Récapitulatif des Résolutions et des Sanctions",
+            "III- Revue d'activités", 
+            "IV- Faits Saillants",
+            "V- Divers"
+        ]
+    
+    return extracted_info
+
+def show_transcript_quality_tips():
+    """Display transcript quality improvement tips."""
+    with st.sidebar.expander("🎯 Transcript Quality Tips", expanded=False):
+        st.markdown("""
+        **Poor Transcript Issues:**
+        - Teams transcripts are often incomplete
+        - Missing speaker identification  
+        - Poor French language recognition
+        - Incomplete sentences and context
+        
+        **Better Alternatives:**
+        1. **Use Whisper transcription** (built into this app)
+           - Upload audio file instead of using Teams transcript
+           - Choose "medium" or "large" model for better French
+        
+        2. **Pre-process your audio:**
+           - Clear background noise
+           - Ensure good microphone quality
+           - Speakers should speak clearly
+        
+        3. **Manual cleanup:**
+           - Review and edit transcripts before processing
+           - Add speaker names: "Grace: ..." 
+           - Fix obvious errors
+        
+        4. **Use structured format:**
+           - Mention agenda items clearly
+           - State resolutions explicitly
+           - Name speakers for activities
+        """)
+
 def main():
     st.title("Meeting Transcription Tool")
     
@@ -903,6 +1082,9 @@ def main():
     st.sidebar.header("Configuration")
     st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
     st.session_state.deepseek_api_key = st.sidebar.text_input("Deepseek API Key", type="password")
+    
+    # Show transcript quality tips
+    show_transcript_quality_tips()
     
     # Show historical context information
     st.sidebar.header("📊 Historical Context")
@@ -968,6 +1150,12 @@ def main():
         st.header("Détails de la Réunion")
         meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
         meeting_date = st.date_input("Date de la Réunion", datetime.now())
+        
+        # Add warning about circular reference
+        formatted_date = meeting_date.strftime("%d/%m/%Y")
+        st.info(f"📅 Meeting date: {formatted_date}")
+        if os.path.exists("processed_meetings") and any(formatted_date.replace("/", "-") in f for f in os.listdir("processed_meetings") if f.endswith('.json')):
+            st.warning(f"⚠️ A meeting for {formatted_date} already exists in historical data. The system will exclude it from context to avoid circular reference.")
     
     with col2:
         st.header("Transcription & Résultat")
@@ -977,31 +1165,42 @@ def main():
             uploaded_file = st.file_uploader("Téléchargez un fichier audio", type=["mp3", "wav", "m4a", "flac"])
             whisper_model = st.selectbox("Modèle Whisper", ["tiny", "base", "small", "medium", "large"], index=1)
             
+            st.info("💡 **Tip:** Use 'medium' or 'large' models for better French transcription quality!")
+            
             if uploaded_file and st.button("Transcrire l'Audio"):
                 file_extension = uploaded_file.name.split('.')[-1].lower()
                 with st.spinner(f"Transcription avec Whisper {whisper_model}..."):
                     transcription = transcribe_audio(uploaded_file, file_extension, whisper_model)
                     if transcription and not transcription.startswith("Error"):
                         st.session_state.transcription = transcription
-                        with st.spinner("Extraction des informations..."):
+                        st.success("✅ Transcription completed!")
+                        st.text_area("Transcription résultante", transcription, height=200)
+                        
+                        with st.spinner("Extraction des informations avec contexte historique..."):
                             extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""))
                             if extracted_info:
                                 st.session_state.extracted_info = extracted_info
-                                st.text_area("Informations Extraites", json.dumps(extracted_info, indent=2), height=300)
+                                st.success("✅ Information extraction completed!")
+                                with st.expander("📋 View Extracted Information"):
+                                    st.json(extracted_info)
         else:
-            transcription_input = st.text_area("Entrez la transcription :", height=200)
+            st.info("💡 **Teams Transcript?** Consider uploading the audio file for better quality!")
+            transcription_input = st.text_area("Entrez la transcription :", height=200, help="Tip: Add speaker names like 'Grace: ...' for better extraction")
             if st.button("Soumettre la Transcription") and transcription_input:
                 st.session_state.transcription = transcription_input
-                with st.spinner("Extraction des informations..."):
+                with st.spinner("Extraction des informations avec contexte historique..."):
                     extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""))
                     if extracted_info:
                         st.session_state.extracted_info = extracted_info
-                        st.text_area("Informations Extraites", json.dumps(extracted_info, indent=2), height=300)
+                        st.success("✅ Information extraction completed!")
+                        with st.expander("📋 View Extracted Information"):
+                            st.json(extracted_info)
         
         if 'extracted_info' in st.session_state and st.button("Générer et Télécharger le Document"):
-            with st.spinner("Génération du document..."):
+            with st.spinner("Génération du document avec données complètes..."):
                 docx_data = fill_template_and_generate_docx(st.session_state.extracted_info, meeting_title, meeting_date)
                 if docx_data:
+                    st.success("✅ Document generated successfully!")
                     st.download_button(
                         label="Télécharger le Document",
                         data=docx_data,

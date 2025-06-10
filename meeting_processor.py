@@ -170,12 +170,13 @@ class MeetingProcessor:
         self.deepseek_api_key = deepseek_api_key
         self.context_dir = context_dir
 
-    def load_historical_context(self, max_meetings: int = 3) -> str:
+    def load_historical_context(self, max_meetings: int = 3, exclude_date: str = "") -> str:
         """
         Load the most recent historical meetings as context.
         
         Args:
             max_meetings: Maximum number of meetings to include as context
+            exclude_date: Date to exclude from context
             
         Returns:
             Formatted context string for the LLM
@@ -190,6 +191,14 @@ class MeetingProcessor:
             for file in os.listdir(self.context_dir):
                 if file.endswith('.json'):
                     filepath = os.path.join(self.context_dir, file)
+                    
+                    # Skip files that match the exclude_date to avoid circular context
+                    if exclude_date:
+                        exclude_date_formatted = exclude_date.replace("/", "-")
+                        if exclude_date_formatted in file:
+                            print(f"Excluding current meeting {file} from historical context to avoid circular reference")
+                            continue
+                    
                     # Get file modification time for sorting
                     mtime = os.path.getmtime(filepath)
                     json_files.append((mtime, filepath, file))
@@ -372,10 +381,10 @@ class MeetingProcessor:
                 return default_value
 
         try:
-            # Load historical context
-            historical_context = self.load_historical_context(max_meetings=3)
+            # Load historical context (excluding current meeting to avoid circular reference)
+            historical_context = self.load_historical_context(max_meetings=3, exclude_date=meeting_date)
             
-            # Create enhanced prompts with context
+            # Create enhanced prompts with context and proper French defaults
             context_instruction = ""
             if historical_context:
                 context_instruction = f"""
@@ -391,11 +400,19 @@ Pay special attention to:
 =====================================
 """
 
+            # Define expected team members
+            expected_members = [
+                "Grace Divine", "Vladimir Soua", "Gael Kiampi", "Emmanuel Teinga",
+                "Aristide Kamga", "Eric Nana", "Divine Kenmogne", "Christ Fotsing",
+                "Armand Tchoupou", "Brice Kamdem", "Ornela Tamo", "Joel Monthe"
+            ]
+
             # 1. Extract attendance with context
             attendance_prompt = f"""
 {context_instruction}
 Extract ONLY the attendance information from the meeting note.
 Consider people mentioned in the historical context above.
+Expected team members: {', '.join(expected_members)}
 Return as two lists in this EXACT format (no other text):
 {{"present": ["name1", "name2"], "absent": ["name3", "name4"]}}
 
@@ -405,27 +422,39 @@ Meeting Note:
             attendance_response = self._make_api_call(attendance_prompt)
             attendance_data = safe_parse_json(attendance_response, {"present": [], "absent": []})
 
-            # 2. Extract agenda items with context
+            # 2. Extract agenda items with proper French defaults
             agenda_prompt = f"""
 {context_instruction}
 Extract ONLY the agenda items from the meeting note.
+IMPORTANT: Unless explicitly mentioned differently, use these French defaults:
+- "I- Relecture du Compte Rendu"
+- "II- Récapitulatif des Résolutions et des Sanctions"
+- "III- Revue d'activités"
+- "IV- Faits Saillants"
+- "V- Divers"
+
 Return as a list in this EXACT format (no other text):
-{{"agenda_items": ["item1", "item2", "item3"]}}
+{{"agenda_items": ["I- Relecture du Compte Rendu", "II- Récapitulatif des Résolutions et des Sanctions", "III- Revue d'activités", "IV- Faits Saillants", "V- Divers"]}}
 
 Meeting Note:
 {text}
 """
             agenda_response = self._make_api_call(agenda_prompt)
-            agenda_data = safe_parse_json(agenda_response, {"agenda_items": []})
+            agenda_data = safe_parse_json(agenda_response, {"agenda_items": [
+                "I- Relecture du Compte Rendu",
+                "II- Récapitulatif des Résolutions et des Sanctions", 
+                "III- Revue d'activités",
+                "IV- Faits Saillants",
+                "V- Divers"
+            ]})
 
             # 3. Extract activities review with context (most important for continuity)
             activities_prompt = f"""
 {context_instruction}
 Extract ONLY the activities review from the meeting note.
-IMPORTANT: Use the historical context to understand:
-- Which activities are continuing from previous meetings
-- Progress updates on ongoing projects
-- New activities vs continuing ones
+CRITICAL: Create entries for ALL expected team members: {', '.join(expected_members)}
+- If a member is not mentioned, use "RAS" for activities, results, and perspectives
+- Use the historical context to understand continuing activities
 
 Return as a list of objects in this EXACT format (no other text):
 {{"activities_review": [
@@ -437,6 +466,22 @@ Meeting Note:
 """
             activities_response = self._make_api_call(activities_prompt)
             activities_data = safe_parse_json(activities_response, {"activities_review": []})
+
+            # Ensure all expected members are included
+            mentioned_actors = {activity.get("actor", "") for activity in activities_data.get("activities_review", [])}
+            complete_activities = list(activities_data.get("activities_review", []))
+            
+            for member in expected_members:
+                if member not in mentioned_actors:
+                    complete_activities.append({
+                        "actor": member,
+                        "dossier": "Non spécifié",
+                        "activities": "RAS",
+                        "results": "RAS",
+                        "perspectives": "RAS"
+                    })
+            
+            activities_data["activities_review"] = complete_activities
 
             # 4. Extract resolutions with context
             resolutions_prompt = f"""
@@ -490,7 +535,13 @@ Meeting Note:
                     "title": meeting_title
                 },
                 "attendance": attendance_data,
-                "agenda_items": agenda_data.get("agenda_items", []),
+                "agenda_items": agenda_data.get("agenda_items", [
+                    "I- Relecture du Compte Rendu",
+                    "II- Récapitulatif des Résolutions et des Sanctions",
+                    "III- Revue d'activités", 
+                    "IV- Faits Saillants",
+                    "V- Divers"
+                ]),
                 "activities_review": activities_data.get("activities_review", []),
                 "resolutions_summary": resolutions_data.get("resolutions_summary", []),
                 "sanctions_summary": sanctions_data.get("sanctions_summary", []),
