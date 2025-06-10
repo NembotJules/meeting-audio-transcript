@@ -606,13 +606,17 @@ def get_missing_data_from_history(extracted_data, historical_meetings):
     
     return extracted_data
 
-def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context=""):
+def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context="", test_mode=False):
     """Extract key information from the transcription using Deepseek API with historical context."""
     if not transcription or not deepseek_api_key:
         return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
-    # Load historical meetings for context (excluding current meeting to avoid circular reference)
-    historical_meetings = load_historical_meetings(exclude_date=date)
+    # Load historical meetings for context (allow circular reference in test mode)
+    exclude_date = None if test_mode else date
+    historical_meetings = load_historical_meetings(exclude_date=exclude_date)
+    
+    if test_mode and historical_meetings:
+        st.info(f"🧪 Test mode: Loaded {len(historical_meetings)} meetings including current for perfect data completion")
     
     # Create comprehensive historical context with full JSON content
     historical_context = ""
@@ -1022,7 +1026,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
 def ensure_complete_member_data(extracted_info):
     """Ensure all expected members have complete activity entries and other tables are properly filled."""
     
-    # Define expected team members
+    # Define expected team members (real names from historical data)
     expected_members = [
         "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
         "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
@@ -1300,6 +1304,46 @@ def smart_historical_data_filling(extracted_data, date, allow_circular=False):
         st.warning(f"Error in smart historical data filling: {str(e)}")
         return extracted_data
 
+def test_perfect_json_generation(date="16/05/2025"):
+    """Test function to load existing perfect JSON and generate document."""
+    try:
+        import json
+        import os
+        
+        # Find the JSON file for the date
+        date_formatted = date.replace("/", "-")
+        json_file = None
+        
+        if os.path.exists("processed_meetings"):
+            for file in os.listdir("processed_meetings"):
+                if date_formatted in file and file.endswith('.json'):
+                    json_file = os.path.join("processed_meetings", file)
+                    break
+        
+        if not json_file:
+            st.error(f"No JSON file found for date {date}")
+            return None
+        
+        # Load the JSON
+        with open(json_file, 'r', encoding='utf-8') as f:
+            extracted_info = json.load(f)
+        
+        st.success(f"✅ Loaded perfect JSON from {json_file}")
+        
+        # Ensure complete member data
+        extracted_info = ensure_complete_member_data(extracted_info)
+        
+        # Apply smart historical filling with circular reference allowed
+        extracted_info = smart_historical_data_filling(extracted_info, date, allow_circular=True)
+        
+        st.info(f"📊 Final data: {len(extracted_info.get('activities_review', []))} activities, {len(extracted_info.get('resolutions_summary', []))} resolutions, {len(extracted_info.get('sanctions_summary', []))} sanctions")
+        
+        return extracted_info
+        
+    except Exception as e:
+        st.error(f"Error loading perfect JSON: {str(e)}")
+        return None
+
 def main():
     st.title("Meeting Transcription Tool")
     
@@ -1395,6 +1439,16 @@ def main():
             if test_mode:
                 st.success("✅ Test mode enabled! Will use existing JSON data to fill gaps for perfect document generation.")
                 st.session_state.test_mode = True
+                
+                # Add test button for direct JSON loading
+                if st.button("🧪 Load Perfect JSON & Generate Document"):
+                    with st.spinner("Loading perfect JSON data..."):
+                        perfect_data = test_perfect_json_generation(formatted_date)
+                        if perfect_data:
+                            st.session_state.extracted_info = perfect_data
+                            st.success("✅ Perfect JSON loaded! Ready for document generation.")
+                            with st.expander("📋 View Perfect JSON Data"):
+                                st.json(perfect_data)
             else:
                 st.info("📊 Normal mode: Will exclude existing meeting from context to avoid circular reference.")
                 st.session_state.test_mode = False
@@ -1426,7 +1480,7 @@ def main():
                             if allow_circular:
                                 st.info("🧪 Test mode: Using existing JSON data for perfect generation")
                             
-                            extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""))
+                            extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""), allow_circular)
                             if extracted_info:
                                 # Apply smart historical filling with test mode
                                 extracted_info = smart_historical_data_filling(extracted_info, meeting_date.strftime("%d/%m/%Y"), allow_circular=allow_circular)
@@ -1440,8 +1494,15 @@ def main():
             if st.button("Soumettre la Transcription") and transcription_input:
                 st.session_state.transcription = transcription_input
                 with st.spinner("Extraction des informations avec contexte historique..."):
-                    extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""))
+                    # Use test mode if enabled
+                    allow_circular = getattr(st.session_state, 'test_mode', False)
+                    if allow_circular:
+                        st.info("🧪 Test mode: Using existing JSON data for perfect generation")
+                    
+                    extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""), allow_circular)
                     if extracted_info:
+                        # Apply smart historical filling with test mode  
+                        extracted_info = smart_historical_data_filling(extracted_info, meeting_date.strftime("%d/%m/%Y"), allow_circular=allow_circular)
                         st.session_state.extracted_info = extracted_info
                         st.success("✅ Information extraction completed!")
                         with st.expander("📋 View Extracted Information"):
