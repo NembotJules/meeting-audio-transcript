@@ -461,15 +461,28 @@ def get_missing_data_from_history(extracted_data, historical_meetings):
     # Use the most recent meeting as the primary source for missing data
     latest_meeting = historical_meetings[0]
     
-    # If no sanctions in current meeting, use sanctions from latest meeting
-    if not extracted_data.get("sanctions_summary") or extracted_data["sanctions_summary"] == []:
+    # More aggressive sanctions handling - check if sanctions are missing or just default
+    current_sanctions = extracted_data.get("sanctions_summary", [])
+    has_real_sanctions = any(s.get("name", "") not in ["Aucune", "", "Non spécifié"] for s in current_sanctions)
+    
+    if not has_real_sanctions:  # No real sanctions found in current meeting
         latest_sanctions = latest_meeting.get("sanctions_summary", [])
-        if latest_sanctions and any(s.get("name", "") != "Aucune" for s in latest_sanctions):
-            # Update dates to current meeting
-            for sanction in latest_sanctions:
-                sanction["date"] = extracted_data["meeting_metadata"]["date"]
-            extracted_data["sanctions_summary"] = latest_sanctions
-            st.info(f"📋 Pulled sanctions data from previous meeting ({latest_meeting['meeting_metadata']['date']})")
+        historical_real_sanctions = [s for s in latest_sanctions if s.get("name", "") not in ["Aucune", "", "Non spécifié"]]
+        
+        if historical_real_sanctions:
+            # Update dates to current meeting and copy sanctions
+            updated_sanctions = []
+            for sanction in historical_real_sanctions:
+                updated_sanction = sanction.copy()
+                updated_sanction["date"] = extracted_data["meeting_metadata"]["date"]
+                updated_sanctions.append(updated_sanction)
+            
+            extracted_data["sanctions_summary"] = updated_sanctions
+            st.info(f"📋 Pulled {len(updated_sanctions)} sanctions from previous meeting ({latest_meeting['meeting_metadata']['date']})")
+            
+            # Log what sanctions were pulled
+            sanction_names = [s.get("name", "") for s in updated_sanctions]
+            st.write(f"Sanctions carried forward: {', '.join(sanction_names)}")
     
     # If no activities, try to get perspectives from previous meeting as starting point
     if not extracted_data.get("activities_review") or len(extracted_data["activities_review"]) == 0:
@@ -478,17 +491,18 @@ def get_missing_data_from_history(extracted_data, historical_meetings):
             # Convert perspectives to new activities
             new_activities = []
             for activity in latest_activities:
-                if activity.get("perspectives") and activity["perspectives"] not in ["RAS", "Aucune", ""]:
+                perspectives = activity.get("perspectives", "")
+                if perspectives and perspectives not in ["RAS", "Aucune", "", "À définir", "Non spécifié"]:
                     new_activities.append({
                         "actor": activity.get("actor", ""),
                         "dossier": activity.get("dossier", ""),
-                        "activities": f"Continuation: {activity.get('perspectives', '')}",
+                        "activities": f"Continuation: {perspectives}",
                         "results": "À déterminer",
                         "perspectives": "À définir"
                     })
             if new_activities:
                 extracted_data["activities_review"] = new_activities
-                st.info(f"📋 Generated activity continuations from previous meeting")
+                st.info(f"📋 Generated {len(new_activities)} activity continuations from previous meeting")
     
     return extracted_data
 
@@ -500,35 +514,65 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     # Load historical meetings for context
     historical_meetings = load_historical_meetings()
     
-    # Create historical context string
+    # Create comprehensive historical context with full JSON content
     historical_context = ""
     if historical_meetings:
-        historical_context = "\n\n=== HISTORICAL CONTEXT ===\n"
-        for i, meeting in enumerate(historical_meetings[:2]):  # Use last 2 meetings
-            historical_context += f"\nMeeting {i+1} ({meeting['meeting_metadata']['date']}):\n"
+        historical_context = "\n\n=== COMPLETE HISTORICAL MEETING DATA ===\n"
+        historical_context += "Use this data to understand continuity, ongoing activities, pending resolutions, and current sanctions.\n"
+        historical_context += "Pay special attention to sanctions_summary for ongoing sanctions that should continue.\n\n"
+        
+        for i, meeting in enumerate(historical_meetings[:2]):  # Use last 2 meetings for full context
+            historical_context += f"=== MEETING {i+1}: {meeting['meeting_metadata']['date']} ===\n"
             
-            # Add key ongoing items
+            # Include attendance for continuity
+            if meeting.get("attendance"):
+                historical_context += f"Attendance:\n"
+                historical_context += f"- Present: {', '.join(meeting['attendance'].get('present', []))}\n"
+                historical_context += f"- Absent: {', '.join(meeting['attendance'].get('absent', []))}\n\n"
+            
+            # Include activities with full detail
             if meeting.get("activities_review"):
-                historical_context += "Previous activities:\n"
-                for activity in meeting["activities_review"][:3]:  # Limit to 3
-                    actor = activity.get("actor", "")
-                    dossier = activity.get("dossier", "")
-                    perspectives = activity.get("perspectives", "")
-                    if perspectives and perspectives not in ["RAS", "Aucune"]:
-                        historical_context += f"- {actor} ({dossier}): {perspectives}\n"
+                historical_context += f"Activities Review:\n"
+                for activity in meeting["activities_review"]:
+                    historical_context += f"- Actor: {activity.get('actor', '')}\n"
+                    historical_context += f"  Dossier: {activity.get('dossier', '')}\n"
+                    historical_context += f"  Activities: {activity.get('activities', '')}\n"
+                    historical_context += f"  Results: {activity.get('results', '')}\n"
+                    historical_context += f"  Perspectives: {activity.get('perspectives', '')}\n\n"
             
-            # Add previous resolutions
+            # Include resolutions with full detail
             if meeting.get("resolutions_summary"):
-                historical_context += "Previous resolutions:\n"
-                for resolution in meeting["resolutions_summary"][:2]:  # Limit to 2
-                    res_text = resolution.get("resolution", "")
-                    responsible = resolution.get("responsible", "")
-                    if res_text:
-                        historical_context += f"- {res_text} (Resp: {responsible})\n"
+                historical_context += f"Resolutions:\n"
+                for resolution in meeting["resolutions_summary"]:
+                    historical_context += f"- Date: {resolution.get('date', '')}\n"
+                    historical_context += f"  Dossier: {resolution.get('dossier', '')}\n"
+                    historical_context += f"  Resolution: {resolution.get('resolution', '')}\n"
+                    historical_context += f"  Responsible: {resolution.get('responsible', '')}\n"
+                    historical_context += f"  Deadline: {resolution.get('deadline', '')}\n"
+                    historical_context += f"  Status: {resolution.get('status', '')}\n\n"
+            
+            # CRITICALLY IMPORTANT: Include sanctions with full detail
+            if meeting.get("sanctions_summary"):
+                historical_context += f"SANCTIONS (IMPORTANT - these may continue to next meeting):\n"
+                for sanction in meeting["sanctions_summary"]:
+                    if sanction.get("name", "") != "Aucune":  # Only include real sanctions
+                        historical_context += f"- Name: {sanction.get('name', '')}\n"
+                        historical_context += f"  Reason: {sanction.get('reason', '')}\n"
+                        historical_context += f"  Amount: {sanction.get('amount', '')} FCFA\n"
+                        historical_context += f"  Date: {sanction.get('date', '')}\n"
+                        historical_context += f"  Status: {sanction.get('status', '')}\n\n"
+            
+            # Include key highlights and miscellaneous
+            if meeting.get("key_highlights"):
+                historical_context += f"Key Highlights: {', '.join(meeting['key_highlights'])}\n"
+            if meeting.get("miscellaneous"):
+                historical_context += f"Miscellaneous: {', '.join(meeting['miscellaneous'])}\n"
+            
+            historical_context += "\n" + "="*60 + "\n\n"
 
     # Create a structured prompt matching historical processor format
     prompt = f"""
-    Based on the meeting transcript below, extract information in the EXACT JSON structure format.
+    You are extracting information from a meeting transcript. Use the historical context below to understand continuity and ongoing items.
 
     {historical_context}
 
@@ -540,6 +584,12 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
 
     Meeting Date: {date}
     Meeting Title: {meeting_title}
+
+    IMPORTANT INSTRUCTIONS:
+    1. If the current transcript mentions ongoing sanctions or doesn't specify new sanctions, use the sanctions from the historical context with updated dates.
+    2. For activities, check if they continue from previous meeting perspectives.
+    3. For resolutions, check if they reference previous resolutions.
+    4. Maintain continuity with historical data where appropriate.
 
     Extract the following information and return as JSON in this EXACT structure:
     {{
@@ -603,7 +653,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 6000
+            "max_tokens": 8000  # Increased to handle larger context
         }
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
@@ -625,7 +675,7 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
             st.error(f"API error: {extracted_data['error']}. Falling back.")
             return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
-        # Fill in missing data from historical meetings
+        # Fill in missing data from historical meetings (as a backup)
         extracted_data = get_missing_data_from_history(extracted_data, historical_meetings)
 
         # Add meeting metadata if not present
@@ -853,6 +903,31 @@ def main():
     st.sidebar.header("Configuration")
     st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
     st.session_state.deepseek_api_key = st.sidebar.text_input("Deepseek API Key", type="password")
+    
+    # Show historical context information
+    st.sidebar.header("📊 Historical Context")
+    historical_meetings = load_historical_meetings()
+    if historical_meetings:
+        st.sidebar.success(f"✅ {len(historical_meetings)} historical meetings loaded")
+        
+        # Show recent meetings
+        for i, meeting in enumerate(historical_meetings):
+            date = meeting.get('meeting_metadata', {}).get('date', 'Unknown')
+            st.sidebar.write(f"📅 Meeting {i+1}: {date}")
+            
+            # Show sanctions count
+            sanctions = meeting.get('sanctions_summary', [])
+            real_sanctions = [s for s in sanctions if s.get('name', '') not in ['Aucune', '', 'Non spécifié']]
+            if real_sanctions:
+                st.sidebar.write(f"   🚨 {len(real_sanctions)} sanctions available")
+                with st.sidebar.expander(f"View sanctions from {date}"):
+                    for sanction in real_sanctions[:5]:  # Show first 5
+                        st.write(f"• {sanction.get('name', '')}: {sanction.get('reason', '')} ({sanction.get('amount', '')} FCFA)")
+            else:
+                st.sidebar.write(f"   ✅ No active sanctions")
+    else:
+        st.sidebar.warning("⚠️ No historical meetings found")
+        st.sidebar.info("💡 Use the Historical Processor app to process past meeting documents first.")
     
     st.sidebar.header("Contexte Précédent")
     previous_report = st.sidebar.file_uploader("Télécharger le rapport précédent", type=["pdf", "png", "jpg", "jpeg"])
