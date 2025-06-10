@@ -1053,8 +1053,23 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         # Add section II header  
         add_styled_paragraph(doc, "II. Récapitulatif des résolutions et sanctions", bold=True, font_size=14, color=RGBColor(0, 0, 0))
         add_styled_paragraph(doc, "Les tableaux des résolutions et des sanctions ont été examinés et mis à jour.", font_size=12)
+        doc.add_paragraph()  # Add spacing
         
-        # Add resolutions (guaranteed to have at least one entry)
+        # Add section III header - Activity Review FIRST
+        add_styled_paragraph(doc, "III. Revue d'activités", bold=True, font_size=14, color=RGBColor(0, 0, 0))
+        doc.add_paragraph()  # Add spacing
+
+        # Add activities review (organized by department with headers) - NOW FIRST TABLE
+        raw_activities = extracted_info.get("activities_review", [])
+        organized_activities = organize_activities_by_department(raw_activities)
+        
+        st.info(f"📊 Generating activity table organized by departments: {len([a for a in organized_activities if a.get('type') == 'activity'])} activities across {len([a for a in organized_activities if a.get('type') == 'header'])} departments")
+        
+        add_activities_table_with_departments(doc, organized_activities)
+        
+        doc.add_page_break()
+
+        # Add resolutions table (AFTER activities)
         resolutions = extracted_info.get("resolutions_summary", [])
         st.info(f"📊 Generating resolutions table with {len(resolutions)} entries")
         
@@ -1072,18 +1087,6 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
 
         doc.add_page_break()
         
-        # Add section III header
-        add_styled_paragraph(doc, "III. Revue d'activités", bold=True, font_size=14, color=RGBColor(0, 0, 0))
-        doc.add_paragraph()  # Add spacing
-
-        # Add activities review (organized by department with headers)
-        raw_activities = extracted_info.get("activities_review", [])
-        organized_activities = organize_activities_by_department(raw_activities)
-        
-        st.info(f"📊 Generating activity table organized by departments: {len([a for a in organized_activities if a.get('type') == 'activity'])} activities across {len([a for a in organized_activities if a.get('type') == 'header'])} departments")
-        
-        add_activities_table_with_departments(doc, organized_activities)
-
         # Add balance
         add_styled_paragraph(doc, f"Solde du compte de solidarité DRI (00001-00921711101-10) est de XAF {extracted_info.get('balance_amount', 'Non spécifié')} au {extracted_info.get('balance_date', '')}.")
 
@@ -1608,13 +1611,28 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
     if not organized_activities:
         return None
     
-    # Define department colors based on screenshots
+    # Define department colors - darker for headers, lighter for rows
     dept_colors = {
-        "DEPARTEMENT INVESTISSEMENT": (255, 0, 0),      # Red
-        "DEPARTEMENT PROJET": (0, 128, 0),              # Green  
-        "DEPARTEMENT IA": (128, 0, 128),                # Purple
-        "DEPARTEMENT INNOVATION": (0, 0, 255),          # Blue
-        "DEPARTEMENT ETUDE": (255, 165, 0)              # Orange
+        "DEPARTEMENT INVESTISSEMENT": {
+            "header": (180, 0, 0),      # Darker red for header
+            "rows": (255, 220, 220)     # Light red for rows
+        },
+        "DEPARTEMENT PROJET": {
+            "header": (0, 100, 0),      # Darker green for header  
+            "rows": (220, 255, 220)     # Light green for rows
+        },
+        "DEPARTEMENT IA": {
+            "header": (100, 0, 100),    # Darker purple for header
+            "rows": (240, 220, 240)     # Light purple for rows
+        },
+        "DEPARTEMENT INNOVATION": {
+            "header": (0, 80, 180),     # Darker blue for header
+            "rows": (220, 240, 255)     # Light blue for rows
+        },
+        "DEPARTEMENT ETUDE": {
+            "header": (200, 100, 0),    # Darker orange for header
+            "rows": (255, 240, 220)     # Light orange for rows
+        }
     }
     
     # Count total rows needed (headers + activities)
@@ -1646,12 +1664,15 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
     
     # Add data rows
     current_row = 1
+    current_department = None
+    
     for item in organized_activities:
         row = table.rows[current_row]
         
         if item.get("type") == "header":
             # Department header row
             dept_name = item.get("department", "")
+            current_department = dept_name
             
             # Merge all cells in this row for department header
             merged_cell = row.cells[0]
@@ -1665,9 +1686,9 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
             run.font.bold = True
             run.font.color.rgb = RGBColor(255, 255, 255)
             
-            # Set department color
-            dept_color = dept_colors.get(dept_name, (128, 128, 128))  # Default gray
-            set_cell_background(merged_cell, dept_color)
+            # Set department header color (darker)
+            dept_color_info = dept_colors.get(dept_name, {"header": (128, 128, 128), "rows": (240, 240, 240)})
+            set_cell_background(merged_cell, dept_color_info["header"])
             merged_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             merged_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             
@@ -1689,9 +1710,14 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
                 run.font.size = Pt(12)
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 
-                # Add alternating row colors for readability
-                if current_row % 2 == 0:
-                    set_cell_background(cell, (240, 240, 240))  # Light gray
+                # Set department row color (lighter version of department color)
+                if current_department:
+                    dept_color_info = dept_colors.get(current_department, {"header": (128, 128, 128), "rows": (240, 240, 240)})
+                    set_cell_background(cell, dept_color_info["rows"])
+                else:
+                    # Fallback alternating colors
+                    if current_row % 2 == 0:
+                        set_cell_background(cell, (240, 240, 240))  # Light gray
         
         current_row += 1
     
