@@ -1140,7 +1140,7 @@ def smart_historical_data_filling(extracted_data, date, allow_circular=False):
     try:
         # Define department structure for member identification
         department_members = {
-            "DEPARTEMENT INVESTISSEMENT": ["Grace Divine", "Vladimir SOUA"],
+            "DEPARTEMENT INVESTISSEMENT": ["Grace Divine", "Vladimir SOUA", "Nour MAHAMAT", "Eric BEIDI"],
             "DEPARTEMENT PROJET": ["Marcellin SEUJIP", "Franklin TANDJA"],
             "DEPARTEMENT IA": ["Emmanuel TEINGA", "Sherelle KANA", "Jules NEMBOT", "Brice DZANGUE"],
             "DEPARTEMENT INNOVATION": ["Jordan KAMSU-KOM", "Christian DJIMELI", "Daniel BAYECK", "Brian ELLA ELLA"],
@@ -1434,7 +1434,7 @@ def organize_activities_by_department(activities_list):
     
     # Define department structure based on the screenshots
     departments = {
-        "DEPARTEMENT INVESTISSEMENT": ["Grace Divine", "Vladimir SOUA"],
+        "DEPARTEMENT INVESTISSEMENT": ["Grace Divine", "Vladimir SOUA", "Nour MAHAMAT", "Eric BEIDI"],
         "DEPARTEMENT PROJET": ["Marcellin SEUJIP", "Franklin TANDJA"],
         "DEPARTEMENT IA": ["Emmanuel TEINGA", "Sherelle KANA", "Jules NEMBOT", "Brice DZANGUE"],
         "DEPARTEMENT INNOVATION": ["Jordan KAMSU-KOM", "Christian DJIMELI", "Daniel BAYECK", "Brian ELLA ELLA"],
