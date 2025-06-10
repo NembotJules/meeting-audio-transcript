@@ -219,6 +219,17 @@ def clean_json_response(response):
 
 def extract_info_fallback(transcription, meeting_title, date, previous_context=""):
     """Fallback function to extract information using improved string parsing and regex."""
+    # Define expected team members (real names from historical data)
+    expected_members = [
+        "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
+        "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
+        "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
+        "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
+        "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
+        "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
+        "Charlène GHOMSI"
+    ]
+    
     # Use the new structure matching historical processor with proper French defaults
     extracted_data = {
         "meeting_metadata": {
@@ -249,17 +260,6 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         "balance_amount": "Non spécifié",
         "balance_date": date
     }
-
-    # Define expected team members (real names from historical data)
-    expected_members = [
-        "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
-        "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
-        "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
-        "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
-        "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
-        "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
-        "Charlène GHOMSI"
-    ]
 
     # Extract presence list
     present_match = re.search(r"(Présents|Présent|Présentes|Présente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
@@ -398,13 +398,14 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
     if balance_date_match:
         extracted_data["balance_date"] = balance_date_match.group(2)
 
-    # Extract activities review - ensure ALL expected members have entries
+    # Extract activities review - ensure ALL expected members have entries, but preserve multiple activities per person
     activities_section = re.search(r"(Revue des activités|Activités de la semaine)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
-    mentioned_activities = {}
+    all_activities = []
     
     if activities_section:
         activities_text = activities_section.group(2).strip()
         activities_lines = [line.strip() for line in activities_text.split("\n") if line.strip()]
+        
         for line in activities_lines:
             actor_match = re.search(r"^[A-Z][a-z]+|^([A-Z][a-z]+(?: [A-Z][a-z]+)?)[\s,]", line)
             dossier_match = re.search(r"(?:dossier|sur le dossier) ([A-Za-z0-9\s]+)", line, re.IGNORECASE)
@@ -414,26 +415,28 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             
             if actor_match:
                 actor = actor_match.group(1) if actor_match.group(1) else actor_match.group(0)
-                mentioned_activities[actor] = {
+                # Add each activity as a separate entry (don't overwrite previous activities for same actor)
+                all_activities.append({
                     "actor": actor,
                     "dossier": dossier_match.group(1).strip() if dossier_match else "Non spécifié",
                     "activities": activities_match.group(1).strip() if activities_match else "Non spécifié",
                     "results": results_match.group(1).strip() if results_match else "Non spécifié",
                     "perspectives": perspectives_match.group(1).strip() if perspectives_match else "Non spécifié"
-                }
+                })
     
-    # Ensure ALL expected members have activity entries
+    # Ensure ALL expected members have at least one activity entry
+    existing_actors = {activity.get("actor", "") for activity in all_activities}
     for member in expected_members:
-        if member not in mentioned_activities:
-            extracted_data["activities_review"].append({
+        if member not in existing_actors:
+            all_activities.append({
                 "actor": member,
                 "dossier": "Non spécifié",
                 "activities": "RAS",
                 "results": "RAS", 
                 "perspectives": "RAS"
             })
-        else:
-            extracted_data["activities_review"].append(mentioned_activities[member])
+
+    extracted_data["activities_review"] = all_activities
 
     # Extract resolutions
     resolution_section = re.search(r"(Résolution|Resolutions)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
@@ -984,13 +987,14 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
 
         doc.add_page_break()
 
-        # Add activities review (guaranteed to have ALL members)
-        activities = extracted_info.get("activities_review", [])
-        st.info(f"📊 Generating activity table with {len(activities)} members")
+        # Add activities review (organized by department with headers)
+        raw_activities = extracted_info.get("activities_review", [])
+        organized_activities = organize_activities_by_department(raw_activities)
+        
+        st.info(f"📊 Generating activity table organized by departments: {len([a for a in organized_activities if a.get('type') == 'activity'])} activities across {len([a for a in organized_activities if a.get('type') == 'header'])} departments")
         
         add_styled_paragraph(doc, "REVUE DES ACTIVITÉS", bold=True, color=RGBColor(192, 0, 0))
-        activities_data = [[a.get("actor", ""), a.get("dossier", ""), a.get("activities", ""), a.get("results", ""), a.get("perspectives", "")] for a in activities]
-        add_styled_table(doc, len(activities) + 1, 5, ["ACTEURS", "DOSSIERS", "ACTIVITÉS", "RÉSULTATS", "PERSPECTIVES"], activities_data, column_widths=[2.0, 2.0, 2.5, 2.0, 2.0], table_width=10.5)
+        add_activities_table_with_departments(doc, organized_activities)
 
         # Add resolutions (guaranteed to have at least one entry)
         resolutions = extracted_info.get("resolutions_summary", [])
@@ -1024,50 +1028,22 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         return None
 
 def ensure_complete_member_data(extracted_info):
-    """Ensure all expected members have complete activity entries and other tables are properly filled."""
+    """Ensure proper data structure and formatting, but only include members who actually have activities."""
     
-    # Define expected team members (real names from historical data)
-    expected_members = [
-        "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
-        "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
-        "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
-        "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
-        "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
-        "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
-        "Charlène GHOMSI"
-    ]
+    # Only work with members who actually have activities - don't force all 25 members
+    activities = extracted_info.get("activities_review", [])
     
-    # Ensure activities_review has all members
-    existing_actors = {activity.get("actor", "") for activity in extracted_info.get("activities_review", [])}
+    # Filter out empty or invalid activities
+    valid_activities = []
+    for activity in activities:
+        actor = activity.get("actor", "").strip()
+        if actor and actor not in ["Non spécifié", "", "RAS"]:
+            # Only include if they have meaningful activities
+            activities_text = activity.get("activities", "").strip()
+            if activities_text and activities_text not in ["Non spécifié", "", "RAS"]:
+                valid_activities.append(activity)
     
-    # Rebuild activities with all members
-    complete_activities = []
-    
-    # Add existing activities
-    for activity in extracted_info.get("activities_review", []):
-        if activity.get("actor") in expected_members:
-            complete_activities.append(activity)
-    
-    # Add missing members
-    for member in expected_members:
-        if member not in existing_actors:
-            complete_activities.append({
-                "actor": member,
-                "dossier": "Non spécifié",
-                "activities": "RAS",
-                "results": "RAS",
-                "perspectives": "RAS"
-            })
-    
-    # Sort by expected order
-    sorted_activities = []
-    for member in expected_members:
-        for activity in complete_activities:
-            if activity.get("actor") == member:
-                sorted_activities.append(activity)
-                break
-    
-    extracted_info["activities_review"] = sorted_activities
+    extracted_info["activities_review"] = valid_activities
     
     # Ensure resolutions_summary has at least one entry
     if not extracted_info.get("resolutions_summary"):
@@ -1162,6 +1138,20 @@ def smart_historical_data_filling(extracted_data, date, allow_circular=False):
     This function allows using the current meeting's JSON if it exists to test perfect generation.
     """
     try:
+        # Define department structure for member identification
+        department_members = {
+            "DEPARTEMENT INVESTISSEMENT": ["Grace Divine", "Vladimir SOUA"],
+            "DEPARTEMENT PROJET": ["Marcellin SEUJIP", "Franklin TANDJA"],
+            "DEPARTEMENT IA": ["Emmanuel TEINGA", "Sherelle KANA", "Jules NEMBOT", "Brice DZANGUE"],
+            "DEPARTEMENT INNOVATION": ["Jordan KAMSU-KOM", "Christian DJIMELI", "Daniel BAYECK", "Brian ELLA ELLA"],
+            "DEPARTEMENT ETUDE": ["Gael KIAMPI", "Francis KAMSU", "Loïc KAMENI"]
+        }
+        
+        # Flatten to get all known team members
+        all_known_members = []
+        for dept_members in department_members.values():
+            all_known_members.extend(dept_members)
+        
         # Load historical meetings (include current if allow_circular=True for testing)
         exclude_date = None if allow_circular else date
         historical_meetings = load_historical_meetings(exclude_date=exclude_date)
@@ -1176,67 +1166,61 @@ def smart_historical_data_filling(extracted_data, date, allow_circular=False):
         
         # Fill missing activity data using historical perspectives as current activities
         activities = extracted_data.get("activities_review", [])
-        if len(activities) < 15:  # If we have incomplete activity data
-            st.info("📋 Filling missing activity data from historical memory...")
-            
-            # Create lookup of existing activities by actor
-            existing_actors = {activity.get("actor", ""): activity for activity in activities}
-            
-            # Get expected team members
-            expected_members = [
-                "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
-                "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
-                "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
-                "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
-                "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
-                "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
-                "Charlène GHOMSI"
-            ]
+        
+        # Check if we have activities but they might be incomplete (check for members who had activities before)
+        existing_actors = {activity.get("actor", "") for activity in activities}
+        
+        # Only check for missing members who had activities in historical meetings
+        historical_activities = latest_meeting.get("activities_review", [])
+        historically_active_members = {activity.get("actor", "") for activity in historical_activities 
+                                     if activity.get("perspectives", "") not in ["RAS", "Non spécifié", ""]}
+        
+        missing_members = [member for member in historically_active_members 
+                          if member in all_known_members and member not in existing_actors]
+        
+        if missing_members:
+            st.info(f"📋 Filling {len(missing_members)} missing members who had activities in historical meetings...")
             
             # Use historical data to fill missing member activities
-            historical_activities = latest_meeting.get("activities_review", [])
-            historical_actors = {activity.get("actor", ""): activity for activity in historical_activities}
+            historical_actors = {}
             
-            complete_activities = []
-            for member in expected_members:
-                if member in existing_actors:
-                    # Use existing data
-                    complete_activities.append(existing_actors[member])
-                elif member in historical_actors:
-                    # Transform historical perspectives into current activities
-                    historical_activity = historical_actors[member]
-                    perspectives = historical_activity.get("perspectives", "")
-                    
-                    if perspectives and perspectives not in ["RAS", "Non spécifié", ""]:
-                        # Use perspectives as current activities
-                        complete_activities.append({
-                            "actor": member,
-                            "dossier": historical_activity.get("dossier", "Non spécifié"),
-                            "activities": f"Continuation: {perspectives}",
-                            "results": "En cours",
-                            "perspectives": "À définir selon avancement"
-                        })
-                        st.write(f"   • {member}: Continued from '{perspectives[:50]}...'")
-                    else:
-                        # Use the last known activity
-                        complete_activities.append({
-                            "actor": member,
-                            "dossier": historical_activity.get("dossier", "Non spécifié"),
-                            "activities": historical_activity.get("activities", "RAS"),
-                            "results": "RAS",
-                            "perspectives": "RAS"
-                        })
-                else:
-                    # Default entry
-                    complete_activities.append({
-                        "actor": member,
-                        "dossier": "Non spécifié",
-                        "activities": "RAS",
-                        "results": "RAS",
-                        "perspectives": "RAS"
-                    })
+            # Group historical activities by actor (allowing multiple activities per person)
+            for activity in historical_activities:
+                actor = activity.get("actor", "")
+                if actor not in historical_actors:
+                    historical_actors[actor] = []
+                historical_actors[actor].append(activity)
             
-            extracted_data["activities_review"] = complete_activities
+            # Add missing members using their historical data
+            for member in missing_members:
+                if member in historical_actors:
+                    # Add all historical activities for this member
+                    for historical_activity in historical_actors[member]:
+                        perspectives = historical_activity.get("perspectives", "")
+                        
+                        if perspectives and perspectives not in ["RAS", "Non spécifié", ""]:
+                            # Use perspectives as current activities
+                            activities.append({
+                                "actor": member,
+                                "dossier": historical_activity.get("dossier", "Non spécifié"),
+                                "activities": f"Continuation: {perspectives}",
+                                "results": "En cours",
+                                "perspectives": "À définir selon avancement"
+                            })
+                            st.write(f"   • {member} ({historical_activity.get('dossier', '')}): Continued from '{perspectives[:50]}...'")
+                        else:
+                            # Use the last known activity only if it had meaningful content
+                            last_activities = historical_activity.get("activities", "")
+                            if last_activities and last_activities not in ["RAS", "Non spécifié", ""]:
+                                activities.append({
+                                    "actor": member,
+                                    "dossier": historical_activity.get("dossier", "Non spécifié"),
+                                    "activities": last_activities,
+                                    "results": "RAS",
+                                    "perspectives": "RAS"
+                                })
+            
+            extracted_data["activities_review"] = activities
         
         # Fill missing resolutions using historical data
         resolutions = extracted_data.get("resolutions_summary", [])
@@ -1343,6 +1327,303 @@ def test_perfect_json_generation(date="16/05/2025"):
     except Exception as e:
         st.error(f"Error loading perfect JSON: {str(e)}")
         return None
+
+def group_activities_by_person_and_dossier(activities_list):
+    """
+    Group activities by person and then by dossier, allowing multiple activities per person/dossier.
+    Returns a flattened list suitable for table generation with proper grouping.
+    """
+    if not activities_list:
+        return []
+    
+    # Group activities by actor
+    actor_groups = {}
+    for activity in activities_list:
+        actor = activity.get("actor", "").strip()
+        if not actor or actor == "Non spécifié":
+            continue
+            
+        if actor not in actor_groups:
+            actor_groups[actor] = {}
+        
+        dossier = activity.get("dossier", "Non spécifié").strip()
+        if not dossier:
+            dossier = "Non spécifié"
+            
+        if dossier not in actor_groups[actor]:
+            actor_groups[actor][dossier] = []
+            
+        actor_groups[actor][dossier].append(activity)
+    
+    # Convert to flattened table format
+    flattened_activities = []
+    
+    # Get expected team members to ensure complete coverage
+    expected_members = [
+        "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
+        "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
+        "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
+        "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
+        "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
+        "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
+        "Charlène GHOMSI"
+    ]
+    
+    for member in expected_members:
+        if member in actor_groups:
+            dossiers = actor_groups[member]
+            first_dossier = True
+            
+            for dossier_name, dossier_activities in dossiers.items():
+                if len(dossier_activities) == 1:
+                    # Single activity for this dossier
+                    activity = dossier_activities[0]
+                    flattened_activities.append({
+                        "actor": member if first_dossier else "",  # Only show name on first row
+                        "dossier": dossier_name,
+                        "activities": activity.get("activities", "RAS"),
+                        "results": activity.get("results", "RAS"),
+                        "perspectives": activity.get("perspectives", "RAS")
+                    })
+                    first_dossier = False
+                else:
+                    # Multiple activities for this dossier - combine them
+                    combined_activities = []
+                    combined_results = []
+                    combined_perspectives = []
+                    
+                    for activity in dossier_activities:
+                        act = activity.get("activities", "").strip()
+                        res = activity.get("results", "").strip() 
+                        per = activity.get("perspectives", "").strip()
+                        
+                        if act and act != "RAS" and act != "Non spécifié":
+                            combined_activities.append(f"• {act}")
+                        if res and res != "RAS" and res != "Non spécifié":
+                            combined_results.append(f"• {res}")
+                        if per and per != "RAS" and per != "Non spécifié":
+                            combined_perspectives.append(f"• {per}")
+                    
+                    flattened_activities.append({
+                        "actor": member if first_dossier else "",  # Only show name on first row
+                        "dossier": dossier_name,
+                        "activities": "\n".join(combined_activities) if combined_activities else "RAS",
+                        "results": "\n".join(combined_results) if combined_results else "RAS", 
+                        "perspectives": "\n".join(combined_perspectives) if combined_perspectives else "RAS"
+                    })
+                    first_dossier = False
+        else:
+            # Member not found in activities - add default entry
+            flattened_activities.append({
+                "actor": member,
+                "dossier": "Non spécifié",
+                "activities": "RAS",
+                "results": "RAS",
+                "perspectives": "RAS"
+            })
+    
+    return flattened_activities
+
+def organize_activities_by_department(activities_list):
+    """
+    Organize activities by department as shown in the real meeting documents.
+    Returns activities grouped by department with headers.
+    """
+    if not activities_list:
+        return []
+    
+    # Define department structure based on the screenshots
+    departments = {
+        "DEPARTEMENT INVESTISSEMENT": ["Grace Divine", "Vladimir SOUA"],
+        "DEPARTEMENT PROJET": ["Marcellin SEUJIP", "Franklin TANDJA"],
+        "DEPARTEMENT IA": ["Emmanuel TEINGA", "Sherelle KANA", "Jules NEMBOT", "Brice DZANGUE"],
+        "DEPARTEMENT INNOVATION": ["Jordan KAMSU-KOM", "Christian DJIMELI", "Daniel BAYECK", "Brian ELLA ELLA"],
+        "DEPARTEMENT ETUDE": ["Gael KIAMPI", "Francis KAMSU", "Loïc KAMENI"]
+    }
+    
+    # Group activities by actor first
+    actor_activities = {}
+    for activity in activities_list:
+        actor = activity.get("actor", "").strip()
+        if not actor or actor == "Non spécifié":
+            continue
+            
+        if actor not in actor_activities:
+            actor_activities[actor] = {}
+        
+        dossier = activity.get("dossier", "Non spécifié").strip()
+        if not dossier:
+            dossier = "Non spécifié"
+            
+        if dossier not in actor_activities[actor]:
+            actor_activities[actor][dossier] = []
+            
+        actor_activities[actor][dossier].append(activity)
+    
+    # Organize by departments
+    organized_activities = []
+    
+    for dept_name, dept_members in departments.items():
+        dept_has_activities = False
+        dept_activities = []
+        
+        for member in dept_members:
+            if member in actor_activities:
+                dept_has_activities = True
+                dossiers = actor_activities[member]
+                first_dossier = True
+                
+                for dossier_name, dossier_activities in dossiers.items():
+                    if len(dossier_activities) == 1:
+                        # Single activity for this dossier
+                        activity = dossier_activities[0]
+                        dept_activities.append({
+                            "type": "activity",
+                            "actor": member if first_dossier else "",
+                            "dossier": dossier_name,
+                            "activities": activity.get("activities", "RAS"),
+                            "results": activity.get("results", "RAS"),
+                            "perspectives": activity.get("perspectives", "RAS")
+                        })
+                        first_dossier = False
+                    else:
+                        # Multiple activities for this dossier - combine them
+                        combined_activities = []
+                        combined_results = []
+                        combined_perspectives = []
+                        
+                        for activity in dossier_activities:
+                            act = activity.get("activities", "").strip()
+                            res = activity.get("results", "").strip() 
+                            per = activity.get("perspectives", "").strip()
+                            
+                            if act and act != "RAS" and act != "Non spécifié":
+                                combined_activities.append(f"• {act}")
+                            if res and res != "RAS" and res != "Non spécifié":
+                                combined_results.append(f"• {res}")
+                            if per and per != "RAS" and per != "Non spécifié":
+                                combined_perspectives.append(f"• {per}")
+                        
+                        dept_activities.append({
+                            "type": "activity",
+                            "actor": member if first_dossier else "",
+                            "dossier": dossier_name,
+                            "activities": "\n".join(combined_activities) if combined_activities else "RAS",
+                            "results": "\n".join(combined_results) if combined_results else "RAS", 
+                            "perspectives": "\n".join(combined_perspectives) if combined_perspectives else "RAS"
+                        })
+                        first_dossier = False
+        
+        # Add department header and activities if department has any activities
+        if dept_has_activities:
+            # Add department header
+            organized_activities.append({
+                "type": "header",
+                "department": dept_name,
+                "actor": "",
+                "dossier": "",
+                "activities": "",
+                "results": "",
+                "perspectives": ""
+            })
+            # Add department activities
+            organized_activities.extend(dept_activities)
+    
+    return organized_activities
+
+def add_activities_table_with_departments(doc, organized_activities, table_width=10.5):
+    """Add activities table with department headers and proper styling."""
+    if not organized_activities:
+        return None
+    
+    # Define department colors based on screenshots
+    dept_colors = {
+        "DEPARTEMENT INVESTISSEMENT": (255, 0, 0),      # Red
+        "DEPARTEMENT PROJET": (0, 128, 0),              # Green  
+        "DEPARTEMENT IA": (128, 0, 128),                # Purple
+        "DEPARTEMENT INNOVATION": (0, 0, 255),          # Blue
+        "DEPARTEMENT ETUDE": (255, 165, 0)              # Orange
+    }
+    
+    # Count total rows needed (headers + activities)
+    total_rows = len(organized_activities) + 1  # +1 for main header
+    
+    # Create table
+    table = doc.add_table(rows=total_rows, cols=5)
+    try:
+        table.style = "Table Grid"
+    except KeyError:
+        pass  # Use default style if Table Grid not available
+    
+    set_table_width(table, table_width)
+    set_column_widths(table, [2.0, 2.0, 2.5, 2.0, 2.0])
+    
+    # Add main header row
+    headers = ["ACTEURS", "DOSSIERS", "ACTIVITÉS", "RÉSULTATS", "PERSPECTIVES"]
+    for j, header in enumerate(headers):
+        cell = table.cell(0, j)
+        cell.text = header
+        run = cell.paragraphs[0].runs[0]
+        run.font.name = "Century"
+        run.font.size = Pt(12)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(255, 255, 255)
+        set_cell_background(cell, (0, 0, 0))  # Black header
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Add data rows
+    current_row = 1
+    for item in organized_activities:
+        row = table.rows[current_row]
+        
+        if item.get("type") == "header":
+            # Department header row
+            dept_name = item.get("department", "")
+            
+            # Merge all cells in this row for department header
+            merged_cell = row.cells[0]
+            for i in range(1, 5):
+                merged_cell.merge(row.cells[i])
+            
+            merged_cell.text = dept_name
+            run = merged_cell.paragraphs[0].runs[0]
+            run.font.name = "Century"
+            run.font.size = Pt(12)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 255, 255)
+            
+            # Set department color
+            dept_color = dept_colors.get(dept_name, (128, 128, 128))  # Default gray
+            set_cell_background(merged_cell, dept_color)
+            merged_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            merged_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+        else:
+            # Regular activity row
+            data = [
+                item.get("actor", ""),
+                item.get("dossier", ""),
+                item.get("activities", ""),
+                item.get("results", ""),
+                item.get("perspectives", "")
+            ]
+            
+            for j, cell_text in enumerate(data):
+                cell = row.cells[j]
+                cell.text = cell_text
+                run = cell.paragraphs[0].runs[0]
+                run.font.name = "Century"
+                run.font.size = Pt(12)
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                
+                # Add alternating row colors for readability
+                if current_row % 2 == 0:
+                    set_cell_background(cell, (240, 240, 240))  # Light gray
+        
+        current_row += 1
+    
+    return table
 
 def main():
     st.title("Meeting Transcription Tool")
