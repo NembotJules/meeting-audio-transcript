@@ -1752,11 +1752,16 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
                     cell.text = dept_name
                     run = cell.paragraphs[0].runs[0]
                     run.font.name = "Century"
-                    run.font.size = Pt(12)
+                    run.font.size = Pt(10)  # Smaller font size for compact headers
                     run.font.bold = True
                     run.font.color.rgb = RGBColor(255, 255, 255)
+                    
+                    # Make department headers more compact with tighter margins
+                    set_cell_margins(cell, top=0.05, bottom=0.05, left=0.1, right=0.1)
                 else:
                     cell.text = ""
+                    # Apply same tight margins to all cells in header row
+                    set_cell_margins(cell, top=0.05, bottom=0.05, left=0.1, right=0.1)
                 
                 # Set department header color (darker)
                 dept_color_info = dept_colors.get(dept_name, {"header": (128, 128, 128), "rows": (240, 240, 240)})
