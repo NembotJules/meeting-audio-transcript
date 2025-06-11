@@ -472,8 +472,13 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             deadline_match = re.search(r"(?:d'ici|avant le) (\d{2}/\d{2}/\d{4})", res, re.IGNORECASE)
             responsible = responsible_match.group(1) if responsible_match else "Non spécifié"
             deadline = deadline_match.group(1) if deadline_match else "Non spécifié"
+            
+            # Look up historical date for this resolution
+            historical_date = get_historical_resolution_date("Non spécifié", responsible, res, exclude_date=date)
+            resolution_date = historical_date if historical_date else date
+            
             extracted_data["resolutions_summary"].append({
-                "date": date,
+                "date": resolution_date,
                 "dossier": "Non spécifié",
                 "resolution": res,
                 "responsible": responsible,
@@ -1199,15 +1204,39 @@ def ensure_complete_member_data(extracted_info):
     
     # Ensure resolutions_summary has at least one entry
     if not extracted_info.get("resolutions_summary"):
-        extracted_info["resolutions_summary"] = [{
-            "date": extracted_info["meeting_metadata"]["date"],
-            "dossier": "Non spécifié",
-            "resolution": "Aucune résolution spécifique mentionnée",
-            "responsible": "Non spécifié",
-            "deadline": "Non spécifié",
-            "execution_date": "",
-            "status": "En cours"
-        }]
+        # Try to get a reasonable resolution from history first
+        historical_meetings = load_historical_meetings(exclude_date=extracted_info["meeting_metadata"]["date"])
+        if historical_meetings:
+            # Look for an ongoing resolution to use as default
+            latest_meeting = historical_meetings[0]
+            historical_resolutions = latest_meeting.get("resolutions_summary", [])
+            ongoing_resolutions = [r for r in historical_resolutions if r.get("status", "") != "Exécuté"]
+            if ongoing_resolutions:
+                # Use the first ongoing resolution as default (preserving original date)
+                default_resolution = ongoing_resolutions[0].copy()
+                extracted_info["resolutions_summary"] = [default_resolution]
+            else:
+                # Create new default with current date
+                extracted_info["resolutions_summary"] = [{
+                    "date": extracted_info["meeting_metadata"]["date"],
+                    "dossier": "Non spécifié",
+                    "resolution": "Aucune résolution spécifique mentionnée",
+                    "responsible": "Non spécifié",
+                    "deadline": "Non spécifié",
+                    "execution_date": "",
+                    "status": "En cours"
+                }]
+        else:
+            # No history available, create new default with current date
+            extracted_info["resolutions_summary"] = [{
+                "date": extracted_info["meeting_metadata"]["date"],
+                "dossier": "Non spécifié",
+                "resolution": "Aucune résolution spécifique mentionnée",
+                "responsible": "Non spécifié",
+                "deadline": "Non spécifié",
+                "execution_date": "",
+                "status": "En cours"
+            }]
     
     # Enhance resolutions with historical data for missing members
     extracted_info = enhance_resolutions_with_history(extracted_info, extracted_info["meeting_metadata"]["date"])
@@ -1387,14 +1416,15 @@ def smart_historical_data_filling(extracted_data, date, allow_circular=False):
             ongoing_resolutions = []
             for resolution in historical_resolutions:
                 if resolution.get("status", "") != "Exécuté":
-                    # Update date to current meeting
+                    # Keep original date - don't update to current meeting
                     updated_resolution = resolution.copy()
-                    updated_resolution["date"] = date
+                    # DON'T update the date - preserve historical assignment date
+                    # updated_resolution["date"] = date  # REMOVED - this was the problem!
                     ongoing_resolutions.append(updated_resolution)
             
             if ongoing_resolutions:
                 extracted_data["resolutions_summary"] = ongoing_resolutions
-                st.write(f"   • Carried forward {len(ongoing_resolutions)} ongoing resolutions")
+                st.write(f"   • Carried forward {len(ongoing_resolutions)} ongoing resolutions with original dates")
             else:
                 # Create default resolution entry
                 extracted_data["resolutions_summary"] = [{
@@ -2034,9 +2064,10 @@ def enhance_resolutions_with_history(extracted_data, date):
                         if resolution.get("responsible", "") == missing_member:
                             # Found a resolution for this missing member
                             enhanced_resolution = resolution.copy()
-                            enhanced_resolution["date"] = date  # Update to current meeting date
+                            # DON'T update the date - preserve original assignment date
+                            # enhanced_resolution["date"] = date  # REMOVED - this was the problem!
                             enhanced_resolutions.append(enhanced_resolution)
-                            st.info(f"   ✅ Added resolution for {missing_member} from {meeting['meeting_metadata']['date']}")
+                            st.info(f"   ✅ Added resolution for {missing_member} from {meeting['meeting_metadata']['date']} (original date: {resolution.get('date', 'Unknown')})")
                             break
                     else:
                         continue  # Continue to next meeting
@@ -2050,6 +2081,78 @@ def enhance_resolutions_with_history(extracted_data, date):
     except Exception as e:
         st.warning(f"Error enhancing resolutions: {str(e)}")
         return extracted_data
+
+def get_historical_resolution_date(dossier, responsible, resolution_text, exclude_date=None):
+    """
+    Look up the original assignment date for a resolution/dossier from historical meetings.
+    
+    Args:
+        dossier: Dossier name to match
+        responsible: Responsible person to match  
+        resolution_text: Resolution text to match
+        exclude_date: Date to exclude from search (current meeting)
+        
+    Returns:
+        Original date if found, or None if not found
+    """
+    try:
+        # Load historical meetings
+        historical_meetings = load_historical_meetings(exclude_date=exclude_date)
+        
+        if not historical_meetings:
+            return None
+        
+        # Search through historical meetings for matching resolution
+        for meeting in historical_meetings:
+            historical_resolutions = meeting.get("resolutions_summary", [])
+            
+            for resolution in historical_resolutions:
+                hist_dossier = resolution.get("dossier", "").strip().lower()
+                hist_responsible = resolution.get("responsible", "").strip().lower()
+                hist_resolution = resolution.get("resolution", "").strip().lower()
+                hist_date = resolution.get("date", "").strip()
+                
+                # Normalize inputs for comparison
+                search_dossier = dossier.strip().lower()
+                search_responsible = responsible.strip().lower()
+                search_resolution = resolution_text.strip().lower()
+                
+                # Try different matching strategies
+                matches = []
+                
+                # 1. Exact dossier + responsible match
+                if hist_dossier == search_dossier and hist_responsible == search_responsible:
+                    matches.append(("exact_dossier_responsible", hist_date))
+                
+                # 2. Partial dossier match + responsible match  
+                if (search_dossier in hist_dossier or hist_dossier in search_dossier) and hist_responsible == search_responsible:
+                    matches.append(("partial_dossier_responsible", hist_date))
+                
+                # 3. Responsible match + similar resolution text
+                if hist_responsible == search_responsible and len(search_resolution) > 10:
+                    # Check if significant words overlap
+                    search_words = set(search_resolution.split())
+                    hist_words = set(hist_resolution.split())
+                    overlap = len(search_words.intersection(hist_words))
+                    if overlap >= min(3, len(search_words) // 2):
+                        matches.append(("responsible_resolution", hist_date))
+                
+                # 4. Strong dossier match (even if responsible is different)
+                if hist_dossier == search_dossier and hist_date:
+                    matches.append(("dossier_only", hist_date))
+                
+                # Return the first (best) match found
+                if matches:
+                    match_type, found_date = matches[0]
+                    if found_date:  # Only return if date is not empty
+                        st.info(f"🔍 Found historical date for '{dossier}' ({responsible}): {found_date} (match: {match_type})")
+                        return found_date
+        
+        return None
+        
+    except Exception as e:
+        st.warning(f"Error looking up historical resolution date: {str(e)}")
+        return None
 
 def main():
     """

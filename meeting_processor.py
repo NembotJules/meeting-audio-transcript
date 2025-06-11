@@ -503,6 +503,28 @@ Meeting Note:
             resolutions_response = self._make_api_call(resolutions_prompt)
             resolutions_data = safe_parse_json(resolutions_response, {"resolutions_summary": []})
 
+            # Fix resolution dates using historical data
+            fixed_resolutions = []
+            for resolution in resolutions_data.get("resolutions_summary", []):
+                dossier = resolution.get("dossier", "")
+                responsible = resolution.get("responsible", "")
+                resolution_text = resolution.get("resolution", "")
+                
+                # Look up historical date for this resolution
+                historical_date = get_historical_resolution_date(
+                    dossier, responsible, resolution_text, 
+                    context_dir=self.context_dir, exclude_date=meeting_date
+                )
+                
+                # Use historical date if found, otherwise keep LLM-suggested date
+                if historical_date:
+                    resolution["date"] = historical_date
+                    print(f"Updated resolution date for {responsible} ({dossier}): {historical_date}")
+                
+                fixed_resolutions.append(resolution)
+            
+            resolutions_data["resolutions_summary"] = fixed_resolutions
+
             # 5. Extract sanctions with context
             sanctions_prompt = f"""
 {context_instruction}
@@ -695,4 +717,104 @@ Meeting Note:
             return structured_data
             
         except Exception as e:
-            raise Exception(f"Error processing historical meeting: {str(e)}") 
+            raise Exception(f"Error processing historical meeting: {str(e)}")
+
+def get_historical_resolution_date(dossier, responsible, resolution_text, context_dir="processed_meetings", exclude_date=None):
+    """
+    Look up the original assignment date for a resolution/dossier from historical meetings.
+    
+    Args:
+        dossier: Dossier name to match
+        responsible: Responsible person to match  
+        resolution_text: Resolution text to match
+        context_dir: Directory containing historical meeting JSONs
+        exclude_date: Date to exclude from search (current meeting)
+        
+    Returns:
+        Original date if found, or None if not found
+    """
+    try:
+        if not os.path.exists(context_dir):
+            return None
+        
+        # Get all JSON files in the context directory
+        json_files = []
+        for file in os.listdir(context_dir):
+            if file.endswith('.json'):
+                filepath = os.path.join(context_dir, file)
+                
+                # Skip files that match the exclude_date
+                if exclude_date:
+                    exclude_date_formatted = exclude_date.replace("/", "-")
+                    if exclude_date_formatted in file:
+                        continue
+                
+                # Get file modification time for sorting
+                mtime = os.path.getmtime(filepath)
+                json_files.append((mtime, filepath, file))
+        
+        if not json_files:
+            return None
+        
+        # Sort by modification time (most recent first)
+        json_files.sort(key=lambda x: x[0], reverse=True)
+        
+        # Search through historical meetings for matching resolution
+        for mtime, filepath, filename in json_files:
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    meeting_data = json.load(f)
+                
+                historical_resolutions = meeting_data.get("resolutions_summary", [])
+                
+                for resolution in historical_resolutions:
+                    hist_dossier = resolution.get("dossier", "").strip().lower()
+                    hist_responsible = resolution.get("responsible", "").strip().lower()
+                    hist_resolution = resolution.get("resolution", "").strip().lower()
+                    hist_date = resolution.get("date", "").strip()
+                    
+                    # Normalize inputs for comparison
+                    search_dossier = dossier.strip().lower()
+                    search_responsible = responsible.strip().lower()
+                    search_resolution = resolution_text.strip().lower()
+                    
+                    # Try different matching strategies
+                    matches = []
+                    
+                    # 1. Exact dossier + responsible match
+                    if hist_dossier == search_dossier and hist_responsible == search_responsible:
+                        matches.append(("exact_dossier_responsible", hist_date))
+                    
+                    # 2. Partial dossier match + responsible match  
+                    if (search_dossier in hist_dossier or hist_dossier in search_dossier) and hist_responsible == search_responsible:
+                        matches.append(("partial_dossier_responsible", hist_date))
+                    
+                    # 3. Responsible match + similar resolution text
+                    if hist_responsible == search_responsible and len(search_resolution) > 10:
+                        # Check if significant words overlap
+                        search_words = set(search_resolution.split())
+                        hist_words = set(hist_resolution.split())
+                        overlap = len(search_words.intersection(hist_words))
+                        if overlap >= min(3, len(search_words) // 2):
+                            matches.append(("responsible_resolution", hist_date))
+                    
+                    # 4. Strong dossier match (even if responsible is different)
+                    if hist_dossier == search_dossier and hist_date:
+                        matches.append(("dossier_only", hist_date))
+                    
+                    # Return the first (best) match found
+                    if matches:
+                        match_type, found_date = matches[0]
+                        if found_date:  # Only return if date is not empty
+                            print(f"Found historical date for '{dossier}' ({responsible}): {found_date} (match: {match_type})")
+                            return found_date
+                
+            except Exception as e:
+                print(f"Error reading {filename}: {str(e)}")
+                continue
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error looking up historical resolution date: {str(e)}")
+        return None 
