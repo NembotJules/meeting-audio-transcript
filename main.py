@@ -1745,9 +1745,21 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
             # Department header row
             dept_name = item["department"]
             
-            # Set row height to be more compact
+            # Force header row to be very compact - multiple methods
             try:
-                row.height = Inches(0.3)  # Very compact header row
+                row.height = Inches(0.25)  # Even smaller
+                row.height_rule = 1  # Exact height
+            except:
+                pass
+            
+            # Try setting height at XML level too
+            try:
+                tr = row._element
+                trPr = tr.get_or_add_trPr()
+                trHeight = OxmlElement('w:trHeight')
+                trHeight.set(qn('w:val'), str(int(0.25 * 1440)))  # 0.25 inches in twips
+                trHeight.set(qn('w:hRule'), 'exact')
+                trPr.append(trHeight)
             except:
                 pass
             
@@ -1828,52 +1840,13 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
         
         current_row += 1
     
-    # Third pass: Handle person name spanning - simplified approach
+    # Third pass: Simple name spanning - just clear duplicates (no complex merging)
     for person, span_info in person_spans.items():
         if len(span_info["rows"]) > 1:  # Person has multiple dossiers
-            try:
-                first_row = span_info["start"]
-                
-                # Get the first cell and set it up properly
-                first_cell = table.cell(first_row, 0)
-                first_cell.text = person
-                
-                # Style the first cell
-                run = first_cell.paragraphs[0].runs[0]
-                run.font.name = "Century"
-                run.font.size = Pt(12)
-                run.font.bold = True
-                first_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                first_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
-                # Clear text from subsequent rows for this person
-                for row_num in span_info["rows"][1:]:
-                    try:
-                        duplicate_cell = table.cell(row_num, 0)
-                        duplicate_cell.text = ""  # Clear duplicate names
-                        
-                        # Make the empty cell match the styling but stay empty
-                        duplicate_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                        duplicate_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        
-                    except Exception as clear_error:
-                        st.warning(f"Could not clear duplicate name for {person} at row {row_num}: {clear_error}")
-                
-                # Try the merge as a final step - if it fails, at least names are cleared
+            # Just clear duplicate names from subsequent rows - simple and reliable
+            for row_num in span_info["rows"][1:]:
                 try:
-                    for row_num in span_info["rows"][1:]:
-                        merge_cell = table.cell(row_num, 0)
-                        first_cell.merge(merge_cell)
-                except Exception as merge_error:
-                    # Merge failed but names are cleared, so table still looks good
-                    st.info(f"Merge failed for {person} but duplicate names cleared")
-                        
-            except Exception as e:
-                st.warning(f"Could not process spanning for {person}: {e}")
-                # Fallback: try to at least clear duplicate names
-                try:
-                    for row_num in span_info["rows"][1:]:
-                        table.cell(row_num, 0).text = ""
+                    table.cell(row_num, 0).text = ""
                 except:
                     pass
     
@@ -2077,9 +2050,9 @@ def main():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.header("Détails de la Réunion")
-        meeting_title = st.text_input("Titre de la Réunion", value="Réunion")
-        meeting_date = st.date_input("Date de la Réunion", datetime.now())
+        st.header("Détails de la RéUnion")
+        meeting_title = st.text_input("Titre de la RéUnion", value="Réunion")
+        meeting_date = st.date_input("Date de la RéUnion", datetime.now())
         
         # Add warning about circular reference
         formatted_date = meeting_date.strftime("%d/%m/%Y")
