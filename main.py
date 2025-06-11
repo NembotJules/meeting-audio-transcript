@@ -1745,6 +1745,12 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
             # Department header row
             dept_name = item["department"]
             
+            # Set row height to be more compact
+            try:
+                row.height = Inches(0.3)  # Very compact header row
+            except:
+                pass
+            
             # Merge all cells in this row for department header
             for col in range(5):
                 cell = row.cells[col]
@@ -1752,16 +1758,16 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
                     cell.text = dept_name
                     run = cell.paragraphs[0].runs[0]
                     run.font.name = "Century"
-                    run.font.size = Pt(10)  # Smaller font size for compact headers
+                    run.font.size = Pt(9)  # Even smaller font size for very compact headers
                     run.font.bold = True
                     run.font.color.rgb = RGBColor(255, 255, 255)
                     
-                    # Make department headers more compact with tighter margins
-                    set_cell_margins(cell, top=0.05, bottom=0.05, left=0.1, right=0.1)
+                    # Very tight margins for compact headers
+                    set_cell_margins(cell, top=0.02, bottom=0.02, left=0.05, right=0.05)
                 else:
                     cell.text = ""
-                    # Apply same tight margins to all cells in header row
-                    set_cell_margins(cell, top=0.05, bottom=0.05, left=0.1, right=0.1)
+                    # Apply same very tight margins to all cells in header row
+                    set_cell_margins(cell, top=0.02, bottom=0.02, left=0.05, right=0.05)
                 
                 # Set department header color (darker)
                 dept_color_info = dept_colors.get(dept_name, {"header": (128, 128, 128), "rows": (240, 240, 240)})
@@ -1822,20 +1828,17 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
         
         current_row += 1
     
-    # Third pass: Handle person name spanning using a more reliable method
+    # Third pass: Handle person name spanning - simplified approach
     for person, span_info in person_spans.items():
         if len(span_info["rows"]) > 1:  # Person has multiple dossiers
             try:
-                # Clear text from all but first occurrence
                 first_row = span_info["start"]
-                for row_num in span_info["rows"][1:]:  # Skip first row
-                    table.cell(row_num, 0).text = ""
                 
-                # Try to merge the cells - using a different approach
+                # Get the first cell and set it up properly
                 first_cell = table.cell(first_row, 0)
-                
-                # Set the text and formatting for the first cell
                 first_cell.text = person
+                
+                # Style the first cell
                 run = first_cell.paragraphs[0].runs[0]
                 run.font.name = "Century"
                 run.font.size = Pt(12)
@@ -1843,24 +1846,36 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
                 first_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 first_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 
-                # Attempt merge in a different way - merge consecutive cells one by one
+                # Clear text from subsequent rows for this person
                 for row_num in span_info["rows"][1:]:
                     try:
+                        duplicate_cell = table.cell(row_num, 0)
+                        duplicate_cell.text = ""  # Clear duplicate names
+                        
+                        # Make the empty cell match the styling but stay empty
+                        duplicate_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                        duplicate_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        
+                    except Exception as clear_error:
+                        st.warning(f"Could not clear duplicate name for {person} at row {row_num}: {clear_error}")
+                
+                # Try the merge as a final step - if it fails, at least names are cleared
+                try:
+                    for row_num in span_info["rows"][1:]:
                         merge_cell = table.cell(row_num, 0)
                         first_cell.merge(merge_cell)
-                    except Exception as merge_error:
-                        st.warning(f"Individual merge failed for {person} at row {row_num}: {merge_error}")
-                        # If merge fails, at least make the cell empty and center it
-                        merge_cell.text = ""
+                except Exception as merge_error:
+                    # Merge failed but names are cleared, so table still looks good
+                    st.info(f"Merge failed for {person} but duplicate names cleared")
                         
             except Exception as e:
                 st.warning(f"Could not process spanning for {person}: {e}")
-                # Fallback: just clear duplicate names
-                for row_num in span_info["rows"][1:]:
-                    try:
+                # Fallback: try to at least clear duplicate names
+                try:
+                    for row_num in span_info["rows"][1:]:
                         table.cell(row_num, 0).text = ""
-                    except:
-                        pass
+                except:
+                    pass
     
     return table
 
