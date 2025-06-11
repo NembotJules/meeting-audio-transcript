@@ -1083,7 +1083,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         
         add_styled_paragraph(doc, "RÉCAPITULATIF DES RÉSOLUTIONS", bold=True, color=RGBColor(192, 0, 0))
         resolutions_data = [[r.get("date", ""), r.get("dossier", ""), r.get("resolution", ""), r.get("responsible", ""), r.get("deadline", ""), r.get("execution_date", ""), r.get("status", ""), str(r.get("report_count", "0"))] for r in resolutions]
-        add_styled_table(doc, len(resolutions) + 1, 8, ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"], resolutions_data, column_widths=[1.5, 1.8, 2.5, 1.2, 1.8, 1.5, 1.2, 1.5], table_width=12.0)
+        add_styled_table(doc, len(resolutions) + 1, 8, ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"], resolutions_data, column_widths=[1.8, 2.2, 3.5, 1.5, 2.0, 1.8, 1.5, 1.7], table_width=16.0)
 
         # Add sanctions (guaranteed to have at least one entry)
         sanctions = extracted_info.get("sanctions_summary", [])
@@ -1091,7 +1091,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         
         add_styled_paragraph(doc, "RÉCAPITULATIF DES SANCTIONS", bold=True, color=RGBColor(192, 0, 0))
         sanctions_data = [[s.get("name", ""), s.get("reason", ""), str(s.get("amount", "")), s.get("date", ""), s.get("status", "")] for s in sanctions]
-        add_styled_table(doc, len(sanctions) + 1, 5, ["NOM", "RAISON", "MONTANT (FCFA)", "DATE", "STATUT"], sanctions_data, column_widths=[2.0, 2.5, 2.0, 1.8, 2.2], table_width=10.5)
+        add_styled_table(doc, len(sanctions) + 1, 5, ["NOM", "RAISON", "MONTANT (FCFA)", "DATE", "STATUT"], sanctions_data, column_widths=[2.5, 3.5, 2.5, 2.0, 2.5], table_width=13.0)
 
         doc.add_page_break()
         
@@ -1614,7 +1614,7 @@ def organize_activities_by_department(activities_list):
     
     return organized_activities
 
-def add_activities_table_with_departments(doc, organized_activities, table_width=16.0):  # Increased from 14.0
+def add_activities_table_with_departments(doc, organized_activities, table_width=20.0):  # Much wider table
     """Add activities table with department headers and proper styling."""
     if not organized_activities:
         return None
@@ -1654,9 +1654,9 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
         pass  # Use default style if Table Grid not available
     
     set_table_width(table, table_width)
-    # Much wider column widths - now totaling 16 inches:
+    # MUCH longer/wider individual cells - focus on making data cells very wide:
     # [Actor, Dossier, Activities, Results, Perspectives]
-    set_column_widths(table, [3.5, 3.5, 4.5, 3.5, 3.5])  # Total = 18.5 inches
+    set_column_widths(table, [4.0, 4.0, 6.0, 4.0, 4.0])  # Total = 22.0 inches - VERY WIDE!
     
     # Add main header row
     headers = ["ACTEURS", "DOSSIERS", "ACTIVITÉS", "RÉSULTATS", "PERSPECTIVES"]
@@ -1934,20 +1934,21 @@ def main():
     QUICK TABLE WIDTH ADJUSTMENTS:
     
     To make activity table columns wider/narrower, edit line ~1645 in add_activities_table_with_departments():
-    set_column_widths(table, [3.5, 3.5, 4.5, 3.5, 3.5])
+    set_column_widths(table, [4.0, 4.0, 6.0, 4.0, 4.0])
                              ^^^^  ^^^^  ^^^^  ^^^^  ^^^^
                              Actor Doss  Act   Res   Pers
     
-    - Increase numbers to make columns wider
+    - Increase numbers to make columns wider/longer horizontally
     - Decrease numbers to make columns narrower  
-    - Total should be close to table_width (currently 16.0 inches)
+    - Total should be close to table_width (currently 20.0 inches)
     
-    Current settings (VERY WIDE):
-    - Actor: 3.5 inches
-    - Dossier: 3.5 inches  
-    - Activities: 4.5 inches (widest)
-    - Results: 3.5 inches
-    - Perspectives: 3.5 inches
+    Current settings (EXTREMELY WIDE for longer cells):
+    - Actor: 4.0 inches
+    - Dossier: 4.0 inches  
+    - Activities: 6.0 inches (widest)
+    - Results: 4.0 inches
+    - Perspectives: 4.0 inches
+    - Total: 22.0 inches (VERY LONG individual cells!)
     """
     st.title("Meeting Transcription Tool")
     
