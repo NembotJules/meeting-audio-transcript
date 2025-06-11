@@ -830,22 +830,55 @@ def set_cell_margins(cell, top=0.1, bottom=0.1, left=0.1, right=0.1):
     tcPr.append(tcMar)
 
 def set_table_width(table, width_in_inches):
-    """Set the width of the table."""
+    """Set the width of the table more aggressively."""
     table.autofit = False
     table.allow_autofit = False
     table_width = Inches(width_in_inches)
     table.width = table_width
+    
+    # Try to set table properties more explicitly
+    try:
+        # Access the table properties
+        tbl = table._element
+        tblPr = tbl.tblPr
+        
+        # Set table width property
+        tblW = tblPr.find(qn('w:tblW'))
+        if tblW is None:
+            tblW = OxmlElement('w:tblW')
+            tblPr.append(tblW)
+        tblW.set(qn('w:w'), str(int(width_in_inches * 1440)))  # Convert inches to twips
+        tblW.set(qn('w:type'), 'dxa')
+    except Exception as e:
+        st.warning(f"Could not set table width properties: {e}")
+    
+    # Set cell properties
     for row in table.rows:
         for cell in row.cells:
             cell.width = table_width
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
 def set_column_widths(table, widths_in_inches):
-    """Set preferred widths for each column."""
+    """Set preferred widths for each column more aggressively."""
     for i, width in enumerate(widths_in_inches):
         for row in table.rows:
-            cell = row.cells[i]
-            cell.width = Inches(width)
+            if i < len(row.cells):
+                cell = row.cells[i]
+                cell.width = Inches(width)
+                
+                # Try to set cell width properties more explicitly
+                try:
+                    tc = cell._element
+                    tcPr = tc.get_or_add_tcPr()
+                    tcW = tcPr.find(qn('w:tcW'))
+                    if tcW is None:
+                        tcW = OxmlElement('w:tcW')
+                        tcPr.append(tcW)
+                    tcW.set(qn('w:w'), str(int(width * 1440)))  # Convert inches to twips
+                    tcW.set(qn('w:type'), 'dxa')
+                except Exception as e:
+                    # Don't show warning for every cell, just continue
+                    pass
 
 def add_styled_paragraph(doc, text, font_name="Century", font_size=12, bold=False, color=None, alignment=WD_ALIGN_PARAGRAPH.LEFT):
     """Add a styled paragraph to the document."""
@@ -1083,7 +1116,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         
         add_styled_paragraph(doc, "RÉCAPITULATIF DES RÉSOLUTIONS", bold=True, color=RGBColor(192, 0, 0))
         resolutions_data = [[r.get("date", ""), r.get("dossier", ""), r.get("resolution", ""), r.get("responsible", ""), r.get("deadline", ""), r.get("execution_date", ""), r.get("status", ""), str(r.get("report_count", "0"))] for r in resolutions]
-        add_styled_table(doc, len(resolutions) + 1, 8, ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"], resolutions_data, column_widths=[1.8, 2.2, 3.5, 1.5, 2.0, 1.8, 1.5, 1.7], table_width=16.0)
+        add_styled_table(doc, len(resolutions) + 1, 8, ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"], resolutions_data, column_widths=[2.2, 2.8, 4.5, 2.0, 2.5, 2.2, 2.0, 2.3], table_width=20.5)
 
         # Add sanctions (guaranteed to have at least one entry)
         sanctions = extracted_info.get("sanctions_summary", [])
@@ -1091,7 +1124,7 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         
         add_styled_paragraph(doc, "RÉCAPITULATIF DES SANCTIONS", bold=True, color=RGBColor(192, 0, 0))
         sanctions_data = [[s.get("name", ""), s.get("reason", ""), str(s.get("amount", "")), s.get("date", ""), s.get("status", "")] for s in sanctions]
-        add_styled_table(doc, len(sanctions) + 1, 5, ["NOM", "RAISON", "MONTANT (FCFA)", "DATE", "STATUT"], sanctions_data, column_widths=[2.5, 3.5, 2.5, 2.0, 2.5], table_width=13.0)
+        add_styled_table(doc, len(sanctions) + 1, 5, ["NOM", "RAISON", "MONTANT (FCFA)", "DATE", "STATUT"], sanctions_data, column_widths=[3.0, 4.5, 3.0, 2.5, 3.0], table_width=16.0)
 
         doc.add_page_break()
         
@@ -1614,7 +1647,7 @@ def organize_activities_by_department(activities_list):
     
     return organized_activities
 
-def add_activities_table_with_departments(doc, organized_activities, table_width=20.0):  # Much wider table
+def add_activities_table_with_departments(doc, organized_activities, table_width=24.0):  # EXTREMELY wide table
     """Add activities table with department headers and proper styling."""
     if not organized_activities:
         return None
@@ -1654,9 +1687,9 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
         pass  # Use default style if Table Grid not available
     
     set_table_width(table, table_width)
-    # MUCH longer/wider individual cells - focus on making data cells very wide:
+    # EXTREMELY long/wide individual cells - make them as wide as possible:
     # [Actor, Dossier, Activities, Results, Perspectives]
-    set_column_widths(table, [4.0, 4.0, 6.0, 4.0, 4.0])  # Total = 22.0 inches - VERY WIDE!
+    set_column_widths(table, [5.0, 5.0, 8.0, 5.0, 5.0])  # Total = 28.0 inches - MASSIVE!
     
     # Add main header row
     headers = ["ACTEURS", "DOSSIERS", "ACTIVITÉS", "RÉSULTATS", "PERSPECTIVES"]
@@ -1933,22 +1966,22 @@ def main():
     """
     QUICK TABLE WIDTH ADJUSTMENTS:
     
-    To make activity table columns wider/narrower, edit line ~1645 in add_activities_table_with_departments():
-    set_column_widths(table, [4.0, 4.0, 6.0, 4.0, 4.0])
+    To make activity table columns wider/narrower, edit line ~1640 in add_activities_table_with_departments():
+    set_column_widths(table, [5.0, 5.0, 8.0, 5.0, 5.0])
                              ^^^^  ^^^^  ^^^^  ^^^^  ^^^^
                              Actor Doss  Act   Res   Pers
     
     - Increase numbers to make columns wider/longer horizontally
     - Decrease numbers to make columns narrower  
-    - Total should be close to table_width (currently 20.0 inches)
+    - Total should be close to table_width (currently 24.0 inches)
     
-    Current settings (EXTREMELY WIDE for longer cells):
-    - Actor: 4.0 inches
-    - Dossier: 4.0 inches  
-    - Activities: 6.0 inches (widest)
-    - Results: 4.0 inches
-    - Perspectives: 4.0 inches
-    - Total: 22.0 inches (VERY LONG individual cells!)
+    Current settings (MASSIVELY WIDE for maximum cell length):
+    - Actor: 5.0 inches
+    - Dossier: 5.0 inches  
+    - Activities: 8.0 inches (widest)
+    - Results: 5.0 inches
+    - Perspectives: 5.0 inches
+    - Total: 28.0 inches (MASSIVE individual cells!)
     """
     st.title("Meeting Transcription Tool")
     
