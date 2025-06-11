@@ -1141,8 +1141,9 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         st.info(f"📊 Generating resolutions table with {len(resolutions)} entries")
         
         add_styled_paragraph(doc, "RÉCAPITULATIF DES RÉSOLUTIONS", bold=True, color=RGBColor(192, 0, 0))
-        resolutions_data = [[r.get("date", ""), r.get("dossier", ""), r.get("resolution", ""), r.get("responsible", ""), r.get("deadline", ""), r.get("execution_date", ""), r.get("status", ""), str(r.get("report_count", "0"))] for r in resolutions]
-        add_styled_table(doc, len(resolutions) + 1, 8, ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"], resolutions_data, column_widths=[2.2, 2.8, 4.5, 2.0, 2.5, 2.2, 2.0, 2.3], table_width=20.5)
+        add_resolutions_table_with_overdue_highlighting(doc, resolutions, meeting_date.strftime("%d/%m/%Y"))
+        
+        doc.add_page_break()
 
         # Add sanctions (guaranteed to have at least one entry)
         sanctions = extracted_info.get("sanctions_summary", [])
@@ -2084,16 +2085,16 @@ def enhance_resolutions_with_history(extracted_data, date):
 
 def get_historical_resolution_date(dossier, responsible, resolution_text, exclude_date=None):
     """
-    Look up the original assignment date for a resolution/dossier from historical meetings.
+    Look up the earliest (original) assignment date for a dossier from historical meetings.
     
     Args:
         dossier: Dossier name to match
-        responsible: Responsible person to match  
-        resolution_text: Resolution text to match
+        responsible: Responsible person (not used in simplified version)
+        resolution_text: Resolution text (not used in simplified version)
         exclude_date: Date to exclude from search (current meeting)
         
     Returns:
-        Original date if found, or None if not found
+        Earliest date if found, or None if not found
     """
     try:
         # Load historical meetings
@@ -2102,57 +2103,129 @@ def get_historical_resolution_date(dossier, responsible, resolution_text, exclud
         if not historical_meetings:
             return None
         
-        # Search through historical meetings for matching resolution
+        # Collect all dates for this dossier
+        dossier_dates = []
+        search_dossier = dossier.strip().lower()
+        
+        # Search through all historical meetings
         for meeting in historical_meetings:
             historical_resolutions = meeting.get("resolutions_summary", [])
             
             for resolution in historical_resolutions:
                 hist_dossier = resolution.get("dossier", "").strip().lower()
-                hist_responsible = resolution.get("responsible", "").strip().lower()
-                hist_resolution = resolution.get("resolution", "").strip().lower()
                 hist_date = resolution.get("date", "").strip()
                 
-                # Normalize inputs for comparison
-                search_dossier = dossier.strip().lower()
-                search_responsible = responsible.strip().lower()
-                search_resolution = resolution_text.strip().lower()
-                
-                # Try different matching strategies
-                matches = []
-                
-                # 1. Exact dossier + responsible match
-                if hist_dossier == search_dossier and hist_responsible == search_responsible:
-                    matches.append(("exact_dossier_responsible", hist_date))
-                
-                # 2. Partial dossier match + responsible match  
-                if (search_dossier in hist_dossier or hist_dossier in search_dossier) and hist_responsible == search_responsible:
-                    matches.append(("partial_dossier_responsible", hist_date))
-                
-                # 3. Responsible match + similar resolution text
-                if hist_responsible == search_responsible and len(search_resolution) > 10:
-                    # Check if significant words overlap
-                    search_words = set(search_resolution.split())
-                    hist_words = set(hist_resolution.split())
-                    overlap = len(search_words.intersection(hist_words))
-                    if overlap >= min(3, len(search_words) // 2):
-                        matches.append(("responsible_resolution", hist_date))
-                
-                # 4. Strong dossier match (even if responsible is different)
-                if hist_dossier == search_dossier and hist_date:
-                    matches.append(("dossier_only", hist_date))
-                
-                # Return the first (best) match found
-                if matches:
-                    match_type, found_date = matches[0]
-                    if found_date:  # Only return if date is not empty
-                        st.info(f"🔍 Found historical date for '{dossier}' ({responsible}): {found_date} (match: {match_type})")
-                        return found_date
+                # Simple dossier matching (exact or contains)
+                if hist_dossier == search_dossier or (search_dossier in hist_dossier) or (hist_dossier in search_dossier):
+                    if hist_date:  # Only include non-empty dates
+                        try:
+                            # Parse date to ensure it's valid
+                            from datetime import datetime
+                            parsed_date = datetime.strptime(hist_date, "%d/%m/%Y")
+                            dossier_dates.append((hist_date, parsed_date))
+                        except ValueError:
+                            continue
+        
+        if dossier_dates:
+            # Sort by parsed date and return the earliest
+            dossier_dates.sort(key=lambda x: x[1])
+            earliest_date = dossier_dates[0][0]
+            st.info(f"🔍 Found earliest date for dossier '{dossier}': {earliest_date}")
+            return earliest_date
         
         return None
         
     except Exception as e:
         st.warning(f"Error looking up historical resolution date: {str(e)}")
         return None
+
+def add_resolutions_table_with_overdue_highlighting(doc, resolutions, current_meeting_date, table_width=20.5):
+    """Add a styled resolutions table with red background for overdue items."""
+    if not resolutions:
+        return None
+    
+    # Parse current meeting date for comparison
+    try:
+        from datetime import datetime
+        current_date = datetime.strptime(current_meeting_date, "%d/%m/%Y")
+    except ValueError:
+        # If current date is invalid, don't do any highlighting
+        current_date = None
+        st.warning(f"Invalid current meeting date format: {current_meeting_date}")
+    
+    # Create table
+    table = doc.add_table(rows=len(resolutions) + 1, cols=8)
+    try:
+        table.style = "Table Grid"
+    except KeyError:
+        st.warning("The 'Table Grid' style is not available. Using default style.")
+    
+    set_table_width(table, table_width)
+    column_widths = [2.2, 2.8, 4.5, 2.0, 2.5, 2.2, 2.0, 2.3]
+    set_column_widths(table, column_widths)
+    
+    # Add headers
+    headers = ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"]
+    for j, header in enumerate(headers):
+        cell = table.cell(0, j)
+        cell.text = header
+        run = cell.paragraphs[0].runs[0]
+        run.font.name = "Century"
+        run.font.size = Pt(12)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(255, 255, 255)
+        set_cell_background(cell, (0, 0, 0))  # Black header
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Add data rows with overdue highlighting
+    for i, resolution in enumerate(resolutions):
+        row = table.rows[i + 1]
+        
+        # Check if resolution is overdue
+        is_overdue = False
+        deadline = resolution.get("deadline", "")
+        if current_date and deadline:
+            try:
+                deadline_date = datetime.strptime(deadline, "%d/%m/%Y")
+                if deadline_date < current_date:
+                    is_overdue = True
+                    st.info(f"🔴 Overdue resolution: {resolution.get('dossier', '')} (deadline: {deadline})")
+            except ValueError:
+                # Invalid deadline format, don't highlight
+                pass
+        
+        # Set row background color
+        if is_overdue:
+            row_color = (255, 200, 200)  # Light red for overdue
+        elif i % 2 == 0:
+            row_color = (240, 240, 240)  # Light gray for even rows
+        else:
+            row_color = (255, 255, 255)  # White for odd rows
+        
+        # Prepare row data
+        row_data = [
+            resolution.get("date", ""),
+            resolution.get("dossier", ""),
+            resolution.get("resolution", ""),
+            resolution.get("responsible", ""),
+            resolution.get("deadline", ""),
+            resolution.get("execution_date", ""),
+            resolution.get("status", ""),
+            str(resolution.get("report_count", "0"))
+        ]
+        
+        # Fill cells
+        for j, cell_text in enumerate(row_data):
+            cell = row.cells[j]
+            cell.text = cell_text
+            run = cell.paragraphs[0].runs[0]
+            run.font.name = "Century"
+            run.font.size = Pt(12)
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            set_cell_background(cell, row_color)
+    
+    return table
 
 def main():
     """

@@ -721,17 +721,17 @@ Meeting Note:
 
 def get_historical_resolution_date(dossier, responsible, resolution_text, context_dir="processed_meetings", exclude_date=None):
     """
-    Look up the original assignment date for a resolution/dossier from historical meetings.
+    Look up the earliest (original) assignment date for a dossier from historical meetings.
     
     Args:
         dossier: Dossier name to match
-        responsible: Responsible person to match  
-        resolution_text: Resolution text to match
+        responsible: Responsible person (not used in simplified version)
+        resolution_text: Resolution text (not used in simplified version)
         context_dir: Directory containing historical meeting JSONs
         exclude_date: Date to exclude from search (current meeting)
         
     Returns:
-        Original date if found, or None if not found
+        Earliest date if found, or None if not found
     """
     try:
         if not os.path.exists(context_dir):
@@ -759,7 +759,11 @@ def get_historical_resolution_date(dossier, responsible, resolution_text, contex
         # Sort by modification time (most recent first)
         json_files.sort(key=lambda x: x[0], reverse=True)
         
-        # Search through historical meetings for matching resolution
+        # Collect all dates for this dossier
+        dossier_dates = []
+        search_dossier = dossier.strip().lower()
+        
+        # Search through historical meetings for matching dossier
         for mtime, filepath, filename in json_files:
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
@@ -769,49 +773,28 @@ def get_historical_resolution_date(dossier, responsible, resolution_text, contex
                 
                 for resolution in historical_resolutions:
                     hist_dossier = resolution.get("dossier", "").strip().lower()
-                    hist_responsible = resolution.get("responsible", "").strip().lower()
-                    hist_resolution = resolution.get("resolution", "").strip().lower()
                     hist_date = resolution.get("date", "").strip()
                     
-                    # Normalize inputs for comparison
-                    search_dossier = dossier.strip().lower()
-                    search_responsible = responsible.strip().lower()
-                    search_resolution = resolution_text.strip().lower()
-                    
-                    # Try different matching strategies
-                    matches = []
-                    
-                    # 1. Exact dossier + responsible match
-                    if hist_dossier == search_dossier and hist_responsible == search_responsible:
-                        matches.append(("exact_dossier_responsible", hist_date))
-                    
-                    # 2. Partial dossier match + responsible match  
-                    if (search_dossier in hist_dossier or hist_dossier in search_dossier) and hist_responsible == search_responsible:
-                        matches.append(("partial_dossier_responsible", hist_date))
-                    
-                    # 3. Responsible match + similar resolution text
-                    if hist_responsible == search_responsible and len(search_resolution) > 10:
-                        # Check if significant words overlap
-                        search_words = set(search_resolution.split())
-                        hist_words = set(hist_resolution.split())
-                        overlap = len(search_words.intersection(hist_words))
-                        if overlap >= min(3, len(search_words) // 2):
-                            matches.append(("responsible_resolution", hist_date))
-                    
-                    # 4. Strong dossier match (even if responsible is different)
-                    if hist_dossier == search_dossier and hist_date:
-                        matches.append(("dossier_only", hist_date))
-                    
-                    # Return the first (best) match found
-                    if matches:
-                        match_type, found_date = matches[0]
-                        if found_date:  # Only return if date is not empty
-                            print(f"Found historical date for '{dossier}' ({responsible}): {found_date} (match: {match_type})")
-                            return found_date
+                    # Simple dossier matching (exact or contains)
+                    if hist_dossier == search_dossier or (search_dossier in hist_dossier) or (hist_dossier in search_dossier):
+                        if hist_date:  # Only include non-empty dates
+                            try:
+                                # Parse date to ensure it's valid
+                                parsed_date = datetime.strptime(hist_date, "%d/%m/%Y")
+                                dossier_dates.append((hist_date, parsed_date))
+                            except ValueError:
+                                continue
                 
             except Exception as e:
                 print(f"Error reading {filename}: {str(e)}")
                 continue
+        
+        if dossier_dates:
+            # Sort by parsed date and return the earliest
+            dossier_dates.sort(key=lambda x: x[1])
+            earliest_date = dossier_dates[0][0]
+            print(f"Found earliest date for dossier '{dossier}': {earliest_date}")
+            return earliest_date
         
         return None
         
