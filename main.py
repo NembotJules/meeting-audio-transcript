@@ -264,18 +264,31 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
     # Extract presence list
     present_match = re.search(r"(Présents|Présent|Présentes|Présente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
     absent_match = re.search(r"(Absents|Absent|Absentes|Absente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
+    
+    # Debug attendance extraction
+    if present_match:
+        st.info(f"🔍 Found Present: '{present_match.group(2).strip()}'")
+    if absent_match:
+        st.info(f"🔍 Found Absent: '{absent_match.group(2).strip()}'")
+    
     if present_match or absent_match:
         present = present_match.group(2).strip() if present_match else ""
         absent = absent_match.group(2).strip() if absent_match else ""
         extracted_data["attendance"]["present"] = [name.strip() for name in present.split(",") if name.strip()] if present else []
         extracted_data["attendance"]["absent"] = [name.strip() for name in absent.split(",") if name.strip()] if absent else []
+        
+        # Debug parsed attendance
+        st.info(f"🔍 Parsed Present: {extracted_data['attendance']['present']}")
+        st.info(f"🔍 Parsed Absent: {extracted_data['attendance']['absent']}")
     else:
+        # Fallback method if no explicit attendance found
         names = re.findall(r"\b[A-Z][a-z]+(?: [A-Z][a-z]+)?\b", transcription)
         common_words = {"Réunion", "Projet", "Président", "Rapporteur", "Solde", "Compte", "Ordre", "Agenda"}
         names = [name for name in set(names) if name not in common_words]
         if names:
             extracted_data["attendance"]["present"] = names
             extracted_data["attendance"]["absent"] = []
+            st.warning(f"🔍 Fallback attendance - found names: {names}")
 
     # Extract agenda items - only if explicitly mentioned, otherwise keep defaults
     agenda_match = re.search(r"(Ordre du jour|Agenda)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
@@ -345,7 +358,11 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
             r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}h(?:\d{1,2}min)?)",
             r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}h)",
             r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}min)",
-            r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}\s*heures?)"
+            r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}\s*heures?)",
+            # More patterns for duration
+            r"(?:pendant|during)[\s\w]*?(\d{1,2}h\d{1,2})",
+            r"(?:pendant|during)[\s\w]*?(\d{1,2}\s*heure[s]?\s*et\s*\d{1,2}\s*minute[s]?)",
+            r"(\d{1,2}h\d{1,2})[\s\w]*(?:durée|duration)"
         ]
         
         for pattern in duration_patterns:
@@ -361,16 +378,23 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
                     hours = 0
                     minutes = 0
                     
-                    if "h" in duration_str:
+                    # Better duration parsing
+                    if "h" in duration_str and "min" in duration_str:
+                        hours_match = re.search(r"(\d+)h", duration_str)
+                        minutes_match = re.search(r"(\d+)min", duration_str)
+                        if hours_match:
+                            hours = int(hours_match.group(1))
+                        if minutes_match:
+                            minutes = int(minutes_match.group(1))
+                    elif "h" in duration_str:
                         hours_match = re.search(r"(\d+)h", duration_str)
                         if hours_match:
                             hours = int(hours_match.group(1))
-                    
-                    if "min" in duration_str:
+                    elif "min" in duration_str:
                         minutes_match = re.search(r"(\d+)min", duration_str)
                         if minutes_match:
                             minutes = int(minutes_match.group(1))
-                    elif "heures" in duration_str or "heure" in duration_str:
+                    elif "heure" in duration_str:
                         hours_match = re.search(r"(\d+)", duration_str)
                         if hours_match:
                             hours = int(hours_match.group(1))
@@ -1056,28 +1080,25 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         
         if agenda_list:
             for item in agenda_list:
-                # Clean formatting for agenda items
+                # Use plain paragraph without auto-numbering
                 p = doc.add_paragraph()
-                p.style = 'List Number'
+                # Don't use List Number style to avoid double numbering
                 run = p.add_run(item)
                 run.font.name = "Century"
                 run.font.size = Pt(12)
         else:
             # Fallback to French defaults
             french_agenda = [
-                "Relecture du compte rendu et adoption",
-                "Récapitulatif des résolutions et sanctions",
-                "Revue d'activités",
-                "Faits saillants",
-                "Divers"
+                "I- Relecture du compte rendu et adoption",
+                "II- Récapitulatif des résolutions et sanctions",
+                "III- Revue d'activités",
+                "IV- Faits saillants",
+                "V- Divers"
             ]
-            for i, item in enumerate(french_agenda, 1):
+            for item in french_agenda:
                 p = doc.add_paragraph()
-                p.style = 'List Number'
-                
-                # Add Roman numeral
-                roman_num = ["I", "II", "III", "IV", "V"][i-1]
-                run = p.add_run(f"{roman_num}- {item}")
+                # Use plain paragraph with only Roman numerals (no auto-numbering)
+                run = p.add_run(item)
                 run.font.name = "Century"
                 run.font.size = Pt(12)
 
@@ -1128,8 +1149,23 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
 
         doc.add_page_break()
         
-        # Add balance
-        add_styled_paragraph(doc, f"Solde du compte de solidarité DRI (00001-00921711101-10) est de XAF {extracted_info.get('balance_amount', 'Non spécifié')} au {extracted_info.get('balance_date', '')}.")
+        # Calculate balance as sum of all sanctions
+        sanctions = extracted_info.get("sanctions_summary", [])
+        total_sanctions = 0
+        for sanction in sanctions:
+            try:
+                amount = sanction.get("amount", "0")
+                # Handle both string and numeric amounts
+                if isinstance(amount, str):
+                    amount = amount.replace(" ", "").replace("FCFA", "").replace("XAF", "")
+                total_sanctions += float(amount) if amount and amount != "0" else 0
+            except (ValueError, TypeError):
+                continue
+        
+        st.info(f"💰 Calculated balance from sanctions: {total_sanctions} FCFA")
+        
+        # Add balance with calculated amount
+        add_styled_paragraph(doc, f"Solde du compte de solidarité DRI (00001-00921711101-10) est de XAF {int(total_sanctions)} au {extracted_info.get('balance_date', extracted_info['meeting_metadata']['date'])}.")
 
         # Save to temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
@@ -1172,6 +1208,9 @@ def ensure_complete_member_data(extracted_info):
             "execution_date": "",
             "status": "En cours"
         }]
+    
+    # Enhance resolutions with historical data for missing members
+    extracted_info = enhance_resolutions_with_history(extracted_info, extracted_info["meeting_metadata"]["date"])
     
     # Ensure sanctions_summary has at least one entry
     if not extracted_info.get("sanctions_summary") or all(s.get("name") == "Aucune" for s in extracted_info.get("sanctions_summary", [])):
@@ -1954,6 +1993,63 @@ def show_meeting_guidance():
         **7. Closing (5 min)**
         - End time, account balance
         """)
+
+def enhance_resolutions_with_history(extracted_data, date):
+    """Enhance resolutions by adding missing members' resolutions from previous meetings."""
+    try:
+        # Get current resolutions and find mentioned members
+        current_resolutions = extracted_data.get("resolutions_summary", [])
+        current_responsible = {res.get("responsible", "") for res in current_resolutions}
+        
+        # Expected team members
+        expected_members = [
+            "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
+            "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
+            "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
+            "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
+            "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
+            "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
+            "Charlène GHOMSI"
+        ]
+        
+        # Find members missing from current resolutions
+        missing_members = []
+        for member in expected_members:
+            if member not in current_responsible:
+                missing_members.append(member)
+        
+        if missing_members:
+            st.info(f"🔍 Looking for resolutions for {len(missing_members)} missing members: {', '.join(missing_members)}")
+            
+            # Load historical meetings
+            historical_meetings = load_historical_meetings(exclude_date=date)
+            
+            enhanced_resolutions = list(current_resolutions)  # Start with current
+            
+            for missing_member in missing_members:
+                # Look for this member's latest resolution in historical meetings
+                for meeting in historical_meetings:
+                    historical_resolutions = meeting.get("resolutions_summary", [])
+                    for resolution in historical_resolutions:
+                        if resolution.get("responsible", "") == missing_member:
+                            # Found a resolution for this missing member
+                            enhanced_resolution = resolution.copy()
+                            enhanced_resolution["date"] = date  # Update to current meeting date
+                            enhanced_resolutions.append(enhanced_resolution)
+                            st.info(f"   ✅ Added resolution for {missing_member} from {meeting['meeting_metadata']['date']}")
+                            break
+                    else:
+                        continue  # Continue to next meeting
+                    break  # Found resolution, stop looking for this member
+            
+            extracted_data["resolutions_summary"] = enhanced_resolutions
+            st.info(f"📋 Enhanced resolutions: {len(current_resolutions)} current + {len(enhanced_resolutions) - len(current_resolutions)} historical = {len(enhanced_resolutions)} total")
+        
+        return extracted_data
+        
+    except Exception as e:
+        st.warning(f"Error enhancing resolutions: {str(e)}")
+        return extracted_data
 
 def main():
     """
