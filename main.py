@@ -1614,7 +1614,7 @@ def organize_activities_by_department(activities_list):
     
     return organized_activities
 
-def add_activities_table_with_departments(doc, organized_activities, table_width=14.0):  # Increased from 12.0
+def add_activities_table_with_departments(doc, organized_activities, table_width=16.0):  # Increased from 14.0
     """Add activities table with department headers and proper styling."""
     if not organized_activities:
         return None
@@ -1654,9 +1654,9 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
         pass  # Use default style if Table Grid not available
     
     set_table_width(table, table_width)
-    # Significantly increased column widths:
+    # Much wider column widths - now totaling 16 inches:
     # [Actor, Dossier, Activities, Results, Perspectives]
-    set_column_widths(table, [3.0, 3.0, 4.0, 3.0, 3.0])  # Total = 16.0 inches
+    set_column_widths(table, [3.5, 3.5, 4.5, 3.5, 3.5])  # Total = 18.5 inches
     
     # Add main header row
     headers = ["ACTEURS", "DOSSIERS", "ACTIVITÉS", "RÉSULTATS", "PERSPECTIVES"]
@@ -1672,51 +1672,92 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # Add data rows
+    # Add data rows - REWRITTEN APPROACH
     current_row = 1
     current_department = None
-    person_first_row = {}  # Track first row for each person
+    
+    # First pass: Create all rows with data
+    row_data = []  # Store all row information for processing
     
     for item in organized_activities:
-        row = table.rows[current_row]
-        
         if item.get("type") == "header":
             # Department header row
             dept_name = item.get("department", "")
             current_department = dept_name
-            
-            # Merge all cells in this row for department header
-            merged_cell = row.cells[0]
-            for i in range(1, 5):
-                merged_cell.merge(row.cells[i])
-            
-            merged_cell.text = dept_name
-            run = merged_cell.paragraphs[0].runs[0]
-            run.font.name = "Century"
-            run.font.size = Pt(12)
-            run.font.bold = True
-            run.font.color.rgb = RGBColor(255, 255, 255)
-            
-            # Set department header color (darker)
-            dept_color_info = dept_colors.get(dept_name, {"header": (128, 128, 128), "rows": (240, 240, 240)})
-            set_cell_background(merged_cell, dept_color_info["header"])
-            merged_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            merged_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            
+            row_data.append({
+                "type": "header",
+                "department": dept_name,
+                "current_department": dept_name
+            })
         else:
             # Regular activity row
             actor = item.get("actor", "").strip()
+            row_data.append({
+                "type": "activity",
+                "actor": actor,
+                "dossier": item.get("dossier", ""),
+                "activities": item.get("activities", ""),
+                "results": item.get("results", ""),
+                "perspectives": item.get("perspectives", ""),
+                "current_department": current_department
+            })
+    
+    # Second pass: Fill the table and track person spans
+    person_spans = {}  # {person_name: {"start": row_num, "end": row_num, "rows": [row_nums]}}
+    
+    for i, item in enumerate(row_data):
+        row = table.rows[current_row]
+        
+        if item["type"] == "header":
+            # Department header row
+            dept_name = item["department"]
             
-            # Track first occurrence of each person
-            if actor and actor not in person_first_row:
-                person_first_row[actor] = current_row
+            # Merge all cells in this row for department header
+            for col in range(5):
+                cell = row.cells[col]
+                if col == 0:
+                    cell.text = dept_name
+                    run = cell.paragraphs[0].runs[0]
+                    run.font.name = "Century"
+                    run.font.size = Pt(12)
+                    run.font.bold = True
+                    run.font.color.rgb = RGBColor(255, 255, 255)
+                else:
+                    cell.text = ""
+                
+                # Set department header color (darker)
+                dept_color_info = dept_colors.get(dept_name, {"header": (128, 128, 128), "rows": (240, 240, 240)})
+                set_cell_background(cell, dept_color_info["header"])
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            # Now merge the cells in this row
+            try:
+                start_cell = row.cells[0]
+                for col in range(1, 5):
+                    start_cell.merge(row.cells[col])
+            except Exception as e:
+                st.warning(f"Could not merge header row: {e}")
+            
+        else:
+            # Regular activity row
+            actor = item["actor"]
+            current_dept = item["current_department"]
+            
+            # Track person spans
+            if actor:
+                if actor not in person_spans:
+                    person_spans[actor] = {"start": current_row, "end": current_row, "rows": [current_row]}
+                else:
+                    person_spans[actor]["end"] = current_row
+                    person_spans[actor]["rows"].append(current_row)
             
             data = [
-                actor if actor not in person_first_row or person_first_row[actor] == current_row else "",  # Only show name on first row
-                item.get("dossier", ""),
-                item.get("activities", ""),
-                item.get("results", ""),
-                item.get("perspectives", "")
+                actor,  # We'll handle the spanning later
+                item["dossier"],
+                item["activities"],
+                item["results"],
+                item["perspectives"]
             ]
             
             for j, cell_text in enumerate(data):
@@ -1733,8 +1774,8 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 
                 # Set department row color (lighter version of department color)
-                if current_department:
-                    dept_color_info = dept_colors.get(current_department, {"header": (128, 128, 128), "rows": (240, 240, 240)})
+                if current_dept:
+                    dept_color_info = dept_colors.get(current_dept, {"header": (128, 128, 128), "rows": (240, 240, 240)})
                     set_cell_background(cell, dept_color_info["rows"])
                 else:
                     # Fallback alternating colors
@@ -1743,46 +1784,45 @@ def add_activities_table_with_departments(doc, organized_activities, table_width
         
         current_row += 1
     
-    # Post-process: Merge actor cells for people with multiple dossiers
-    person_rows = {}  # {person: [list of row numbers]}
-    current_row = 1
-    
-    for item in organized_activities:
-        if item.get("type") != "header":
-            actor = item.get("actor", "").strip()
-            if actor:
-                if actor not in person_rows:
-                    person_rows[actor] = []
-                person_rows[actor].append(current_row)
-        current_row += 1
-    
-    # Merge cells for people with multiple rows
-    for person, rows in person_rows.items():
-        if len(rows) > 1:  # Person has multiple dossiers
+    # Third pass: Handle person name spanning using a more reliable method
+    for person, span_info in person_spans.items():
+        if len(span_info["rows"]) > 1:  # Person has multiple dossiers
             try:
-                # Find the first and last row for this person
-                start_row = min(rows)
-                end_row = max(rows)
+                # Clear text from all but first occurrence
+                first_row = span_info["start"]
+                for row_num in span_info["rows"][1:]:  # Skip first row
+                    table.cell(row_num, 0).text = ""
                 
-                # Merge all actor cells for this person
-                start_cell = table.cell(start_row, 0)
-                for row_idx in range(start_row + 1, end_row + 1):
-                    if row_idx in rows:  # Only merge rows that belong to this person
-                        merge_cell = table.cell(row_idx, 0)
-                        start_cell.merge(merge_cell)
+                # Try to merge the cells - using a different approach
+                first_cell = table.cell(first_row, 0)
                 
-                # Set the text and formatting for the merged cell
-                start_cell.text = person
-                run = start_cell.paragraphs[0].runs[0]
+                # Set the text and formatting for the first cell
+                first_cell.text = person
+                run = first_cell.paragraphs[0].runs[0]
                 run.font.name = "Century"
                 run.font.size = Pt(12)
                 run.font.bold = True
-                start_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                start_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                first_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                first_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 
+                # Attempt merge in a different way - merge consecutive cells one by one
+                for row_num in span_info["rows"][1:]:
+                    try:
+                        merge_cell = table.cell(row_num, 0)
+                        first_cell.merge(merge_cell)
+                    except Exception as merge_error:
+                        st.warning(f"Individual merge failed for {person} at row {row_num}: {merge_error}")
+                        # If merge fails, at least make the cell empty and center it
+                        merge_cell.text = ""
+                        
             except Exception as e:
-                st.warning(f"Could not merge cells for {person}: {e}")
-                continue
+                st.warning(f"Could not process spanning for {person}: {e}")
+                # Fallback: just clear duplicate names
+                for row_num in span_info["rows"][1:]:
+                    try:
+                        table.cell(row_num, 0).text = ""
+                    except:
+                        pass
     
     return table
 
@@ -1893,21 +1933,21 @@ def main():
     """
     QUICK TABLE WIDTH ADJUSTMENTS:
     
-    To make activity table columns wider/narrower, edit line ~1629 in add_activities_table_with_departments():
-    set_column_widths(table, [3.0, 3.0, 4.0, 3.0, 3.0])
+    To make activity table columns wider/narrower, edit line ~1645 in add_activities_table_with_departments():
+    set_column_widths(table, [3.5, 3.5, 4.5, 3.5, 3.5])
                              ^^^^  ^^^^  ^^^^  ^^^^  ^^^^
                              Actor Doss  Act   Res   Pers
     
     - Increase numbers to make columns wider
     - Decrease numbers to make columns narrower  
-    - Total should be close to table_width (currently 14.0 inches)
+    - Total should be close to table_width (currently 16.0 inches)
     
-    Current settings (MUCH WIDER):
-    - Actor: 3.0 inches
-    - Dossier: 3.0 inches  
-    - Activities: 4.0 inches (widest)
-    - Results: 3.0 inches
-    - Perspectives: 3.0 inches
+    Current settings (VERY WIDE):
+    - Actor: 3.5 inches
+    - Dossier: 3.5 inches  
+    - Activities: 4.5 inches (widest)
+    - Results: 3.5 inches
+    - Perspectives: 3.5 inches
     """
     st.title("Meeting Transcription Tool")
     
