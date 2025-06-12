@@ -1013,12 +1013,17 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         display_date = meeting_metadata.get("date", extracted_info.get("date", ""))
         add_styled_paragraph(doc, display_date, bold=True, color=RGBColor(192, 0, 0), alignment=WD_ALIGN_PARAGRAPH.CENTER)
         
-        add_styled_paragraph(doc, f"Heure de début: {extracted_info.get('start_time', 'Non spécifié')}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
-        add_styled_paragraph(doc, f"Heure de fin: {extracted_info.get('end_time', 'Non spécifié')}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+        add_styled_paragraph(doc, f"Heure de début: {convert_time_format(extracted_info.get('start_time', 'Non spécifié'))}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+        add_styled_paragraph(doc, f"Heure de fin: {convert_time_format(extracted_info.get('end_time', 'Non spécifié'))}", bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
         
-        # Debug: Check if times are being extracted
-        st.info(f"🕐 Start time: {extracted_info.get('start_time', 'Non spécifié')}")
-        st.info(f"🕕 End time: {extracted_info.get('end_time', 'Non spécifié')}")
+        # Debug: Check if times are being extracted and converted
+        original_start = extracted_info.get('start_time', 'Non spécifié')
+        original_end = extracted_info.get('end_time', 'Non spécifié')
+        converted_start = convert_time_format(original_start)
+        converted_end = convert_time_format(original_end)
+        
+        st.info(f"🕐 Start time: {original_start} → {converted_start}")
+        st.info(f"🕕 End time: {original_end} → {converted_end}")
         
         rapporteur = extracted_info.get("rapporteur", "Non spécifié")
         if rapporteur != "Non spécifié":
@@ -2227,6 +2232,63 @@ def add_resolutions_table_with_overdue_highlighting(doc, resolutions, current_me
             set_cell_background(cell, row_color)
     
     return table
+
+def convert_time_format(time_str):
+    """
+    Convert time from various formats to French format (HHhMMmin).
+    
+    Args:
+        time_str: Time in formats like "06:08AM", "6:08 AM", "06h08min", etc.
+        
+    Returns:
+        Time in French format "06h08min" or original if conversion fails
+    """
+    if not time_str or time_str == "Non spécifié":
+        return "Non spécifié"
+    
+    try:
+        import re
+        from datetime import datetime
+        
+        # Remove extra spaces
+        time_str = time_str.strip()
+        
+        # If already in French format, return as is
+        if re.match(r'\d{1,2}h\d{2}min?', time_str, re.IGNORECASE):
+            return time_str
+        
+        # Handle AM/PM format: "06:08AM", "6:08 AM", etc.
+        am_pm_pattern = r'(\d{1,2}):(\d{2})\s*(AM|PM)'
+        match = re.match(am_pm_pattern, time_str, re.IGNORECASE)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            period = match.group(3).upper()
+            
+            # Convert to 24-hour format
+            if period == 'AM':
+                if hour == 12:
+                    hour = 0
+            else:  # PM
+                if hour != 12:
+                    hour += 12
+            
+            return f"{hour:02d}h{minute:02d}min"
+        
+        # Handle 24-hour format: "14:30", "14:30:00"
+        time_24h_pattern = r'(\d{1,2}):(\d{2})(?::\d{2})?'
+        match = re.match(time_24h_pattern, time_str)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            return f"{hour:02d}h{minute:02d}min"
+        
+        # If no pattern matches, return original
+        return time_str
+        
+    except Exception as e:
+        # If conversion fails, return original
+        return time_str
 
 def main():
     """
