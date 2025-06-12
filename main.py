@@ -869,37 +869,56 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
                     break
 
         if not extracted_data.get("end_time") or extracted_data.get("end_time") == "Non spécifié":
-            # Extract end time with improved patterns
+            # Extract end time with improved patterns - find SECOND time occurrence or end-specific patterns
             end_time_patterns = [
-                # AM/PM formats first (highest priority)
-                r"(\d{1,2}:\d{2}\s*AM)",  # 08:15 AM or 08:15AM
-                r"(\d{1,2}:\d{2}AM)",     # 08:15AM (no space)
-                r"(\d{1,2}:\d{2}\s*PM)",  # 08:15 PM or 08:15PM
-                r"(\d{1,2}:\d{2}PM)",     # 08:15PM (no space)
-                r"(\d{1,2}:\d{2}\s*am)",  # lowercase am
-                r"(\d{1,2}:\d{2}am)",     # lowercase am (no space)
-                r"(\d{1,2}:\d{2}\s*pm)",  # lowercase pm
-                r"(\d{1,2}:\d{2}pm)",     # lowercase pm (no space)
-                # French context patterns
+                # End-specific context patterns first (highest priority)
+                r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}:\d{2}\s*[AP]M)",
+                r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}:\d{2}[AP]M)",
                 r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}[h:]\d{2})",
-                r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}h\d{2}min)",
-                r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}h)",
+                r"(?:jusqu'à|until|vers|around)[\s\w]*?(\d{1,2}:\d{2}\s*[AP]M)",
                 r"(?:jusqu'à|until|vers|around)[\s\w]*?(\d{1,2}[h:]\d{2})",
-                r"(?:jusqu'à|until|vers|around)[\s\w]*?(\d{1,2}h)",
                 r"(\d{1,2}[h:]\d{2})[\s\w]*(?:fin|terminée|end)",
                 r"(\d{1,2}h\d{2}min)[\s\w]*(?:fin|terminée|end)",
                 r"(\d{1,2}h)[\s\w]*(?:fin|terminée|end)"
             ]
             
+            end_time_found = False
             for pattern in end_time_patterns:
                 end_time_match = re.search(pattern, transcription, re.IGNORECASE)
                 if end_time_match:
                     time_str = end_time_match.group(1)
-                    # Use the convert_time_format function to handle all conversions
                     converted_time = convert_time_format(time_str)
                     extracted_data["end_time"] = converted_time
-                    st.info(f"🕕 Extracted end time from transcription: '{time_str}' → '{converted_time}'")
+                    st.info(f"🕕 Extracted end time from context: '{time_str}' → '{converted_time}'")
+                    end_time_found = True
                     break
+            
+            # If no end-specific pattern found, try to find the SECOND time occurrence
+            if not end_time_found:
+                # Find all AM/PM times in order
+                all_times_pattern = r"(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))"
+                all_times = re.findall(all_times_pattern, transcription, re.IGNORECASE)
+                
+                if len(all_times) >= 2:
+                    # Use the second time as end time
+                    end_time_str = all_times[1]
+                    converted_time = convert_time_format(end_time_str)
+                    extracted_data["end_time"] = converted_time
+                    st.info(f"🕕 Extracted end time as second occurrence: '{end_time_str}' → '{converted_time}'")
+                    end_time_found = True
+                elif len(all_times) == 1:
+                    # Only one time found, look for non-AM/PM times as potential end time
+                    all_other_times = re.findall(r"(\d{1,2}[h:]\d{2})", transcription)
+                    # Filter out the start time we already found
+                    start_time_raw = extracted_data.get("start_time", "").replace("min", "").replace("h", ":")
+                    other_times = [t for t in all_other_times if t.replace("h", ":") != start_time_raw]
+                    
+                    if other_times:
+                        end_time_str = other_times[0]
+                        converted_time = convert_time_format(end_time_str)
+                        extracted_data["end_time"] = converted_time
+                        st.info(f"🕕 Extracted end time from other time formats: '{end_time_str}' → '{converted_time}'")
+                        end_time_found = True
 
         # Extract duration and calculate end time if we have start time but no end time
         if (extracted_data.get("start_time", "Non spécifié") != "Non spécifié" and 
@@ -2211,11 +2230,12 @@ def enhance_resolutions_with_history(extracted_data, date):
 def get_historical_resolution_date(dossier, responsible, resolution_text, exclude_date=None):
     """
     Look up the earliest (original) assignment date for a dossier from historical meetings.
+    Simply finds the earliest appearance of the dossier name across all meetings.
     
     Args:
         dossier: Dossier name to match
-        responsible: Responsible person (not used in simplified version)
-        resolution_text: Resolution text (not used in simplified version)
+        responsible: Responsible person (not used - for compatibility)
+        resolution_text: Resolution text (not used - for compatibility)
         exclude_date: Date to exclude from search (current meeting)
         
     Returns:
@@ -2228,11 +2248,15 @@ def get_historical_resolution_date(dossier, responsible, resolution_text, exclud
         if not historical_meetings:
             return None
         
-        # Collect all dates for this dossier
+        # If dossier is empty or "Non spécifié", can't search
+        if not dossier or dossier.strip().lower() in ["non spécifié", "", "non specifie"]:
+            return None
+        
+        # Collect all dates for this dossier (case-insensitive search)
         dossier_dates = []
         search_dossier = dossier.strip().lower()
         
-        # Search through all historical meetings
+        # Search through ALL historical meetings
         for meeting in historical_meetings:
             historical_resolutions = meeting.get("resolutions_summary", [])
             
@@ -2240,23 +2264,34 @@ def get_historical_resolution_date(dossier, responsible, resolution_text, exclud
                 hist_dossier = resolution.get("dossier", "").strip().lower()
                 hist_date = resolution.get("date", "").strip()
                 
-                # Simple dossier matching (exact or contains)
-                if hist_dossier == search_dossier or (search_dossier in hist_dossier) or (hist_dossier in search_dossier):
-                    if hist_date:  # Only include non-empty dates
-                        try:
-                            # Parse date to ensure it's valid
-                            from datetime import datetime
-                            parsed_date = datetime.strptime(hist_date, "%d/%m/%Y")
-                            dossier_dates.append((hist_date, parsed_date))
-                        except ValueError:
-                            continue
+                # Match if dossier names are similar (exact match or one contains the other)
+                dossier_match = False
+                if hist_dossier and search_dossier:
+                    if hist_dossier == search_dossier:
+                        dossier_match = True
+                    elif len(search_dossier) > 5 and search_dossier in hist_dossier:
+                        dossier_match = True
+                    elif len(hist_dossier) > 5 and hist_dossier in search_dossier:
+                        dossier_match = True
+                
+                if dossier_match and hist_date:
+                    try:
+                        # Parse date to ensure it's valid
+                        from datetime import datetime
+                        parsed_date = datetime.strptime(hist_date, "%d/%m/%Y")
+                        dossier_dates.append((hist_date, parsed_date))
+                        st.info(f"📅 Found dossier '{dossier}' on {hist_date}")
+                    except ValueError:
+                        continue
         
         if dossier_dates:
             # Sort by parsed date and return the earliest
             dossier_dates.sort(key=lambda x: x[1])
             earliest_date = dossier_dates[0][0]
-            st.info(f"🔍 Found earliest date for dossier '{dossier}': {earliest_date}")
+            st.success(f"✅ Earliest date for dossier '{dossier}': {earliest_date}")
             return earliest_date
+        else:
+            st.warning(f"⚠️ No historical date found for dossier '{dossier}'")
         
         return None
         
