@@ -1170,8 +1170,9 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         
         st.info(f"💰 Calculated balance from sanctions: {total_sanctions} FCFA")
         
-        # Add balance with calculated amount
-        add_styled_paragraph(doc, f"Solde du compte de solidarité DRI (00001-00921711101-10) est de XAF {int(total_sanctions)} au {extracted_info.get('balance_date', extracted_info['meeting_metadata']['date'])}.")
+        # Add balance with calculated amount - fix currency format and use meeting date
+        meeting_date_str = extracted_info['meeting_metadata']['date']
+        add_styled_paragraph(doc, f"Solde du compte de solidarité DRI (00001-00921711101-10) est de {int(total_sanctions)} XAF au {meeting_date_str}.")
 
         # Save to temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
