@@ -834,6 +834,125 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
         if "meeting_metadata" not in extracted_data:
             extracted_data["meeting_metadata"] = {"date": date, "title": meeting_title}
 
+        # CRITICAL FIX: Extract start_time and end_time from transcription using regex patterns
+        # This ensures we capture times even if the API doesn't extract them properly
+        if not extracted_data.get("start_time") or extracted_data.get("start_time") == "Non spécifié":
+            # Extract start time with improved patterns
+            start_time_patterns = [
+                # AM/PM formats first (highest priority)
+                r"(\d{1,2}:\d{2}\s*AM)",  # 06:08 AM or 06:08AM
+                r"(\d{1,2}:\d{2}AM)",     # 06:08AM (no space)
+                r"(\d{1,2}:\d{2}\s*am)",  # lowercase am
+                r"(\d{1,2}:\d{2}am)",     # lowercase am (no space)
+                # French context patterns
+                r"(?:début|commence|commencée|démarré|start)[\s\w]*?(\d{1,2}[h:]\d{2})",
+                r"(?:début|commence|commencée|démarré|start)[\s\w]*?(\d{1,2}h\d{2}min)",
+                r"(?:début|commence|commencée|démarré|start)[\s\w]*?(\d{1,2}h)",
+                r"(?:à|vers|around)\s*(\d{1,2}[h:]\d{2})",
+                r"(?:à|vers|around)\s*(\d{1,2}h)",
+                r"(\d{1,2}[h:]\d{2})[\s\w]*(?:début|commence|start)",
+                r"(\d{1,2}h\d{2}min)[\s\w]*(?:début|commence|start)",
+                r"(\d{1,2}h)[\s\w]*(?:début|commence|start)",
+                # Generic time patterns (fallback)
+                r"(\d{1,2}:\d{2})",  # 06:08 format
+                r"(\d{1,2}h\d{2})",  # 06h08 format
+            ]
+            
+            for pattern in start_time_patterns:
+                start_time_match = re.search(pattern, transcription, re.IGNORECASE)
+                if start_time_match:
+                    time_str = start_time_match.group(1)
+                    # Use the convert_time_format function to handle all conversions
+                    converted_time = convert_time_format(time_str)
+                    extracted_data["start_time"] = converted_time
+                    st.info(f"🕐 Extracted start time from transcription: '{time_str}' → '{converted_time}'")
+                    break
+
+        if not extracted_data.get("end_time") or extracted_data.get("end_time") == "Non spécifié":
+            # Extract end time with improved patterns
+            end_time_patterns = [
+                # AM/PM formats first (highest priority)
+                r"(\d{1,2}:\d{2}\s*AM)",  # 08:15 AM or 08:15AM
+                r"(\d{1,2}:\d{2}AM)",     # 08:15AM (no space)
+                r"(\d{1,2}:\d{2}\s*PM)",  # 08:15 PM or 08:15PM
+                r"(\d{1,2}:\d{2}PM)",     # 08:15PM (no space)
+                r"(\d{1,2}:\d{2}\s*am)",  # lowercase am
+                r"(\d{1,2}:\d{2}am)",     # lowercase am (no space)
+                r"(\d{1,2}:\d{2}\s*pm)",  # lowercase pm
+                r"(\d{1,2}:\d{2}pm)",     # lowercase pm (no space)
+                # French context patterns
+                r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}[h:]\d{2})",
+                r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}h\d{2}min)",
+                r"(?:fin|terminée|terminé|ended|fini)[\s\w]*?(\d{1,2}h)",
+                r"(?:jusqu'à|until|vers|around)[\s\w]*?(\d{1,2}[h:]\d{2})",
+                r"(?:jusqu'à|until|vers|around)[\s\w]*?(\d{1,2}h)",
+                r"(\d{1,2}[h:]\d{2})[\s\w]*(?:fin|terminée|end)",
+                r"(\d{1,2}h\d{2}min)[\s\w]*(?:fin|terminée|end)",
+                r"(\d{1,2}h)[\s\w]*(?:fin|terminée|end)"
+            ]
+            
+            for pattern in end_time_patterns:
+                end_time_match = re.search(pattern, transcription, re.IGNORECASE)
+                if end_time_match:
+                    time_str = end_time_match.group(1)
+                    # Use the convert_time_format function to handle all conversions
+                    converted_time = convert_time_format(time_str)
+                    extracted_data["end_time"] = converted_time
+                    st.info(f"🕕 Extracted end time from transcription: '{time_str}' → '{converted_time}'")
+                    break
+
+        # Extract duration and calculate end time if we have start time but no end time
+        if (extracted_data.get("start_time", "Non spécifié") != "Non spécifié" and 
+            extracted_data.get("end_time", "Non spécifié") == "Non spécifié"):
+            duration_patterns = [
+                r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}h(?:\d{1,2}min)?)",
+                r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}h)",
+                r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}min)",
+                r"(?:durée|dure|duré|lasted|pendant)[\s\w]*?(\d{1,2}\s*heures?)",
+            ]
+            
+            for pattern in duration_patterns:
+                duration_match = re.search(pattern, transcription, re.IGNORECASE)
+                if duration_match:
+                    try:
+                        start_time_str = extracted_data["start_time"].replace("h", ":").replace("min", "")
+                        if ":" not in start_time_str:
+                            start_time_str += ":00"
+                        start_time = datetime.strptime(start_time_str, "%H:%M")
+                        
+                        duration_str = duration_match.group(1)
+                        hours = 0
+                        minutes = 0
+                        
+                        # Parse duration
+                        if "h" in duration_str and "min" in duration_str:
+                            hours_match = re.search(r"(\d+)h", duration_str)
+                            minutes_match = re.search(r"(\d+)min", duration_str)
+                            if hours_match:
+                                hours = int(hours_match.group(1))
+                            if minutes_match:
+                                minutes = int(minutes_match.group(1))
+                        elif "h" in duration_str:
+                            hours_match = re.search(r"(\d+)h", duration_str)
+                            if hours_match:
+                                hours = int(hours_match.group(1))
+                        elif "min" in duration_str:
+                            minutes_match = re.search(r"(\d+)min", duration_str)
+                            if minutes_match:
+                                minutes = int(minutes_match.group(1))
+                        elif "heure" in duration_str:
+                            hours_match = re.search(r"(\d+)", duration_str)
+                            if hours_match:
+                                hours = int(hours_match.group(1))
+                        
+                        duration_delta = timedelta(hours=hours, minutes=minutes)
+                        end_time = start_time + duration_delta
+                        extracted_data["end_time"] = end_time.strftime("%Hh%Mmin")
+                        st.info(f"🕕 Calculated end time from duration: {extracted_data['end_time']}")
+                        break
+                    except (ValueError, AttributeError) as e:
+                        continue
+
         return extracted_data
 
     except Exception as e:
