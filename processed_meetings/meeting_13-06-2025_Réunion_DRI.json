@@ -1,0 +1,984 @@
+{
+  "meeting_metadata": {
+    "date": "13/06/2025",
+    "title": "Réunion DRI"
+  },
+  "attendance": {
+    "present": [
+      "Amelin EPOH",
+      "Franklin YOUMBI",
+      "Loïc KAMENI",
+      "Christian DJIMELI",
+      "Daniel BAYECK",
+      "Sherelle KANA",
+      "Cédric DONFACK",
+      "Wilfried DOPGANG",
+      "Gaël KIAMPI",
+      "Franklin TANDJA",
+      "Marcellin SEUJIP",
+      "Brice DZANGUE",
+      "Charlène GHOMSI",
+      "Francis KAMSU",
+      "Jules NEMBOT",
+      "Jordan KAMSU-KOM",
+      "Vladimir SOUA"
+    ],
+    "absent": [
+      "Éric BEIDI",
+      "Nour MAHAMAT",
+      "Divine NDE",
+      "Brian ELLA ELLA",
+      "Emmanuel TEINGA",
+      "Boris ON MAKONG",
+      "Ismaël POUNGOUM"
+    ]
+  },
+  "agenda_items": [
+    "I- Relecture du Compte Rendu",
+    "II- Récapitulatif des Résolutions et des Sanctions",
+    "III- Revue d'activités",
+    "IV- Faits Saillants",
+    "V- Divers"
+  ],
+  "activities_review": [
+    {
+      "actor": "Grace Divine",
+      "dossier": "Financement des projets d'investissement",
+      "activities": "Transmission de la fiche d'analyses complète",
+      "results": "RAS",
+      "perspectives": "Notification de l'école sur l'état des garanties (Présentation de nouvelles garanties ou restructuration du besoin)"
+    },
+    {
+      "actor": "Vladimir SOUA",
+      "dossier": "Financement des projets d'investissement",
+      "activities": "Analyse du dossier de demande de financement de la relation MAMAYAKO SARL",
+      "results": "RAS",
+      "perspectives": "Rédaction de la FAR et début de rédaction de la fiche d'analyse"
+    },
+    {
+      "actor": "Vladimir SOUA",
+      "dossier": "Financement des projets d'investissement",
+      "activities": "Finalisation de la fiche d'analyse de la relation KENNY'S AND CO SARL",
+      "results": "RAS",
+      "perspectives": "Programmation du Comité de crédit"
+    },
+    {
+      "actor": "Vladimir SOUA",
+      "dossier": "FOGAJEUNE",
+      "activities": "Rédaction de la Note de cadrage",
+      "results": "RAS",
+      "perspectives": "Avis des Unités de contrôle et de la DGE"
+    },
+    {
+      "actor": "Vladimir SOUA",
+      "dossier": "Activités de prospection",
+      "activities": "Présentation à Monsieur DJOUGUELLA pour observation et ensuite au chef de département",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Vladimir SOUA",
+      "dossier": "Déploiement des TPE",
+      "activities": "Vente de nouveau TPE",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Gael KIAMPI",
+      "dossier": "Avance sur salaire",
+      "activities": "Validation de l'étude études au comité de management",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Gael KIAMPI",
+      "dossier": "Campagne de conversion des clients",
+      "activities": "Lancement de la campagne (100 clients souscris pour le 31 mai)",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Gael KIAMPI",
+      "dossier": "Processus de migration des modules de portal vers Intra",
+      "activities": "Intégration des observation et retransmission du cahier de charges au niveau de la DSI",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Gael KIAMPI",
+      "dossier": "Enquête satisfaction",
+      "activities": "Évaluation du taux de résolution des difficultés rencontrées par les clients",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Emmanuel TEINGA",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Francis KAMSU",
+      "dossier": "Déploiement GFA V2",
+      "activities": "Déploiement dans 5 agences Douala et Bamenda",
+      "results": "RAS",
+      "perspectives": "Poursuivre le déploiement dans la ville de Yaoundé"
+    },
+    {
+      "actor": "Francis KAMSU",
+      "dossier": "Procédure de maturation des idées",
+      "activities": "Intégration des observations",
+      "results": "RAS",
+      "perspectives": "Présentation au sous-comité de validation des procédures"
+    },
+    {
+      "actor": "Francis KAMSU",
+      "dossier": "Dashboard GFA",
+      "activities": "Conception de l'interface GFC",
+      "results": "RAS",
+      "perspectives": "Finaliser la conception de l'interface"
+    },
+    {
+      "actor": "Jordan KAMSU-KOM",
+      "dossier": "Nouvelle version du dashboard de reporting des activités commerciales",
+      "activities": "Conception du dashboard",
+      "results": "RAS",
+      "perspectives": "Finaliser le Dashboard"
+    },
+    {
+      "actor": "Jordan KAMSU-KOM",
+      "dossier": "Déploiement et formation GFA V2 - GFC",
+      "activities": "Formation des agences de Mimboman et Messamendongo",
+      "results": "RAS",
+      "perspectives": "Former les agences de Mballa 2 et Mbalgon"
+    },
+    {
+      "actor": "Jordan KAMSU-KOM",
+      "dossier": "Automate de mise à jour des dashboards",
+      "activities": "Conception de l'automate",
+      "results": "RAS",
+      "perspectives": "Finaliser la conception"
+    },
+    {
+      "actor": "Loïc KAMENI",
+      "dossier": "Reporting des activités de la transformation digitale",
+      "activities": "Faire le suivi",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Loïc KAMENI",
+      "dossier": "Etude sur le Mil/sorgho",
+      "activities": "Rédaction de la stratégie de déploiement",
+      "results": "RAS",
+      "perspectives": "Finaliser la stratégie de déploiement"
+    },
+    {
+      "actor": "Loïc KAMENI",
+      "dossier": "Analyse des marchands OM/MOMO",
+      "activities": "Prospection de clients pour 29 millions de ressources",
+      "results": "RAS",
+      "perspectives": "Faire valider le protocole"
+    },
+    {
+      "actor": "Loïc KAMENI",
+      "dossier": "Etudes sur analyses du canal USSD Sara et le ressenti des clients",
+      "activities": "Rédaction partielle du rapport de l'étude et sollicitation des observations de la DSI",
+      "results": "RAS",
+      "perspectives": "Recueillir les observations de la DSI et finaliser le rapport d'étude USSD"
+    },
+    {
+      "actor": "Christian DJIMELI",
+      "dossier": "Système d'alerte précoce des impayés",
+      "activities": "Implémentation des relances dans le Dashboard",
+      "results": "RAS",
+      "perspectives": "Finaliser l'implémentation des relances par mail des GFC et clients"
+    },
+    {
+      "actor": "Christian DJIMELI",
+      "dossier": "Déploiement et formation GFA V2 - GFC",
+      "activities": "Formation des agences de Nkoabang, Yassa et Omnisport",
+      "results": "RAS",
+      "perspectives": "Former les agences d'AKWA, PAD, Finance islamique"
+    },
+    {
+      "actor": "Christian DJIMELI",
+      "dossier": "Développement de INTRA",
+      "activities": "Intégration des maquettes de INTRA et du portail Client",
+      "results": "RAS",
+      "perspectives": "Finaliser l'intégration des maquettes du portail clients"
+    },
+    {
+      "actor": "Daniel BAYECK",
+      "dossier": "Déploiement GFA V2",
+      "activities": "Déploiement des agences ESSOS et Mbalgon",
+      "results": "RAS",
+      "perspectives": "Déployer 10 agences"
+    },
+    {
+      "actor": "Daniel BAYECK",
+      "dossier": "Déploiement nouvelle version FirstCopilot",
+      "activities": "Déploiement DRI, DSI et des GFC",
+      "results": "RAS",
+      "perspectives": "Poursuivre le Déploiement dans 6 agences de Douala"
+    },
+    {
+      "actor": "Brice DZANGUE",
+      "dossier": "Potentiel sur les plafonds cartes",
+      "activities": "Rédaction du rapport",
+      "results": "RAS",
+      "perspectives": "Présenter le rapport au CPS"
+    },
+    {
+      "actor": "Brice DZANGUE",
+      "dossier": "Reporting des prestataires",
+      "activities": "Identification d'indicateurs des 20 partenaires retenus",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Sherelle KANA",
+      "dossier": "Apurement des dossiers clients (voyages hors CEMAC)",
+      "activities": "Elaboration des modules d'identification des pièces.",
+      "results": "RAS",
+      "perspectives": "Après acquisition des ressources supplémentaires, tester les modules et déployer le modèle"
+    },
+    {
+      "actor": "Sherelle KANA",
+      "dossier": "Identification des fraudes",
+      "activities": "Elaboration du dashboard",
+      "results": "RAS",
+      "perspectives": "Finaliser la conception du dashboard et concevoir le modèle d'IA devant permettre de classifier automatiquement les fraudes"
+    },
+    {
+      "actor": "Sherelle KANA",
+      "dossier": "Déploiement et formation GFA V2",
+      "activities": "Formation dans les agences de Mfoundi et Marché central",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Jules NEMBOT",
+      "dossier": "IA meeting",
+      "activities": "Correction des bugs",
+      "results": "RAS",
+      "perspectives": "Reprogrammer un thinking time"
+    },
+    {
+      "actor": "Jules NEMBOT",
+      "dossier": "Conception d'un agent intelligent d'analyse des dossiers de crédit",
+      "activities": "Obtention des habilitations",
+      "results": "RAS",
+      "perspectives": "Après acquisition des ressources supplémentaires, finaliser la conception"
+    },
+    {
+      "actor": "Jules NEMBOT",
+      "dossier": "Formation GFA V2",
+      "activities": "Formation de l'agence Mfoudi",
+      "results": "RAS",
+      "perspectives": "Former l'agence de Mvog-mbi"
+    },
+    {
+      "actor": "Jules NEMBOT",
+      "dossier": "Projet de catégorisation des réclamations",
+      "activities": "Livrer les prédictions du modèle au support",
+      "results": "RAS",
+      "perspectives": "Recueillir les observations du support"
+    },
+    {
+      "actor": "Nour MAHAMAT",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Franklin TANDJA",
+      "dossier": "COMEX à distance",
+      "activities": "Tests concluant des fonctionnalités de la solution et enrôlement de 3 clients",
+      "results": "RAS",
+      "perspectives": "Former les clients pour utiliser la solution"
+    },
+    {
+      "actor": "Franklin TANDJA",
+      "dossier": "Agence Mobile V2",
+      "activities": "Elaboration d'un cahier de charge intégrant les observations du Comité sur les critères d'acceptation",
+      "results": "RAS",
+      "perspectives": "Présenter le cahier de charge"
+    },
+    {
+      "actor": "Marcellin SEUJIP",
+      "dossier": "Maturation des idées projet",
+      "activities": "Elaboration d'une charte qui encadre l'accompagnement du prestataire dans la mise en œuvre des recommandations prises pendant sa mission d'audit effectuée au sein de la banque",
+      "results": "RAS",
+      "perspectives": "Recueillir les inputs du commanditaire, finalisation et validation de la charte"
+    },
+    {
+      "actor": "Marcellin SEUJIP",
+      "dossier": "Projet d'identification des clients black-listés",
+      "activities": "Elaboration de la charte",
+      "results": "RAS",
+      "perspectives": "Finaliser et valider la charte"
+    },
+    {
+      "actor": "Marcellin SEUJIP",
+      "dossier": "Projet d'authentification des clients",
+      "activities": "Elaboration du document d'idée-projet",
+      "results": "RAS",
+      "perspectives": "Finalisation du document d'idée-projet"
+    },
+    {
+      "actor": "Divine NDE",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Brian ELLA ELLA",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Amelin EPOH",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Franklin YOUMBI",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Cédric DONFACK",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Wilfried DOPGANG",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Ismaël POUNGOUM",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Éric BEIDI",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Boris ON MAKONG",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Charlène GHOMSI",
+      "dossier": "Gestion des stocks de chéquiers en agences",
+      "activities": "Elaboration du prototype de recensement des stocks de chéquiers",
+      "results": "RAS",
+      "perspectives": "Validation par la DOMP"
+    },
+    {
+      "actor": "Charlène GHOMSI",
+      "dossier": "Projet MINSUP",
+      "activities": "Transmission du cahier de charge pour observation à la DRB",
+      "results": "RAS",
+      "perspectives": "Recueillir les observations de la DRB"
+    },
+    {
+      "actor": "Charlène GHOMSI",
+      "dossier": "Projet FIRST BANK DELIVERY",
+      "activities": "Obtention de l'AVIS du CPS",
+      "results": "RAS",
+      "perspectives": "Obtenir la validation du mémo et lancer la campagne"
+    }
+  ],
+  "resolutions_summary": [
+    {
+      "date": "13/06/2025",
+      "dossier": "Etude mil-sorgho",
+      "resolution": "Rédiger une stratégie de déploiement",
+      "responsible": "Loic KAMENI",
+      "deadline": "19/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "13/06/2025",
+      "dossier": "Système d'alerte précoce des impayés",
+      "resolution": "Finaliser l'implémentation des relances par mail des GFC et clients",
+      "responsible": "Christian Djimeli",
+      "deadline": "16/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "13/06/2025",
+      "dossier": "Tableau de suivi de collecte d'épargne",
+      "resolution": "Intégrer les éléments de visualisation attendus et finaliser le dashboard",
+      "responsible": "Christian Djimeli",
+      "deadline": "15/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "13/06/2025",
+      "dossier": "Application de collecte d'épargne",
+      "resolution": "Intégration des API",
+      "responsible": "Jordan KAMSUKOM",
+      "deadline": "18/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "13/06/2025",
+      "dossier": "Déploiement nouvelle version FirstCopilot",
+      "resolution": "Elaborer et transmettre un questionnaire d'évaluation de la satisfaction des utilisateurs",
+      "responsible": "Daniel BAYECK",
+      "deadline": "16/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "13/06/2025",
+      "dossier": "Projet MINSUP",
+      "resolution": "Faire valider le cahier de charge par la DRB",
+      "responsible": "Charlène GHOMSI",
+      "deadline": "18/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "13/06/2025",
+      "dossier": "Identification des fraudes",
+      "resolution": "Dashboard de visualisation des soupçons des fraudes",
+      "responsible": "Sherelle KANA",
+      "deadline": "19/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "13/06/2025",
+      "dossier": "Potentiel sur les plafonds cartes",
+      "resolution": "Présenter le rapport au CPS",
+      "responsible": "Brice DZANGUE",
+      "deadline": "18/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "23/05/2025",
+      "dossier": "Digitalisation des demandes, reports d'échéances et prorogations administratives relatives aux lettres de crédit",
+      "resolution": "Finaliser le dashboard et lancer la phase pilote",
+      "responsible": "Boris On Makong",
+      "deadline": "26/05/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "13/06/2025",
+      "dossier": "Rating Risk",
+      "resolution": "Analyse du positionnement de la banque sur le rating des dossiers de demande de financement des start-ups",
+      "responsible": "Vladimir Soua",
+      "deadline": "26/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "13/06/2025",
+      "dossier": "Transmission rapport de formation spécialisée",
+      "resolution": "Transmettre le rapport de formation aux RH",
+      "responsible": "Vladimir Soua",
+      "deadline": "27/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "23/05/2025",
+      "dossier": "Blocage des comptes",
+      "resolution": "Présenter le protocole d'étude",
+      "responsible": "Daniel Bayeck",
+      "deadline": "29/05/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "16/05/2025",
+      "dossier": "Suivi des TPE",
+      "resolution": "Finaliser le mémo de campagne et le dashboard",
+      "responsible": "Brian Ella",
+      "deadline": "20/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "16/05/2025",
+      "dossier": "Thinking Time",
+      "resolution": "IA Meeting nouvelle version",
+      "responsible": "Jules NEMBOT",
+      "deadline": "17/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "23/05/2025",
+      "dossier": "Comité de Crédit",
+      "resolution": "Organisation du comité de crédit",
+      "responsible": "Amelin EPOH",
+      "deadline": "26/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "09/05/2025",
+      "dossier": "Anticipation des tombées en panne sur les automates",
+      "resolution": "Analyse des causes profondes de non réception des Log des GAB",
+      "responsible": "Emmanuel TEINGA",
+      "deadline": "23/06/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "16/05/2025",
+      "dossier": "Etude sur Huile de palme",
+      "resolution": "Présenter l'Idée Etudes",
+      "responsible": "Grace Divine NDE",
+      "deadline": "22/05/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "16/05/2025",
+      "dossier": "Thinking Time",
+      "resolution": "Affecturage",
+      "responsible": "Loïc KAMENI",
+      "deadline": "21/05/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "02/05/2025",
+      "dossier": "Gestion personnalisée des plafonds des cartes",
+      "resolution": "Envoyer l'idée projet au CPS",
+      "responsible": "Brice DZANGUE",
+      "deadline": "12/05/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "02/05/2025",
+      "dossier": "Commande- livraison des chéquiers",
+      "resolution": "Présenter le planning du mémo de campagne",
+      "responsible": "Charlène GHOMSI",
+      "deadline": "05/05/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "06/12/2024",
+      "dossier": "Automatisation des sources des données à la banque.",
+      "resolution": "Automatiser les différentes sources des données qu'on peut exploiter à la banque pour faciliter la conception des Dashboard",
+      "responsible": "Cédric DONFACK",
+      "deadline": "",
+      "status": "Non exécutée"
+    },
+    {
+      "date": "10/01/2025",
+      "dossier": "Projet de commande et livraison des chéquiers",
+      "resolution": "Prototype réalisé",
+      "responsible": "Charlène GHOMSI",
+      "deadline": "31/05/2025",
+      "status": "Non exécutée"
+    },
+    {
+      "date": "07/03/2025",
+      "dossier": "PRO1",
+      "resolution": "Archivage des comptes rendus des comités d'étude et PV",
+      "responsible": "Éric BEIDI",
+      "deadline": "",
+      "status": "Non Exécuté"
+    },
+    {
+      "date": "07/03/2025",
+      "dossier": "PRO1",
+      "resolution": "Archivage des comptes rendus des réunions hebdomadaires et mensuels",
+      "responsible": "Nour MAHAMAT",
+      "deadline": "",
+      "status": "Exécuté"
+    },
+    {
+      "date": "07/03/2025",
+      "dossier": "PRO1",
+      "resolution": "Archivage des rapports Dashboard et workflows",
+      "responsible": "Francis KAMSU",
+      "deadline": "",
+      "status": "Exécuté"
+    },
+    {
+      "date": "07/03/2025",
+      "dossier": "PRO1",
+      "resolution": "Archivage des produits et projets PPMS",
+      "responsible": "Brice DZANGUE",
+      "deadline": "",
+      "status": "Exécuté"
+    },
+    {
+      "date": "07/03/2025",
+      "dossier": "PRO1",
+      "resolution": "Archivage toute la documentation sur les stagiaires (comptes rendus, CV, documents d'onboarding, rapport etc.)",
+      "responsible": "Emmanuel TEINGA",
+      "deadline": "",
+      "status": "Exécuté"
+    },
+    {
+      "date": "07/03/2025",
+      "dossier": "PRO1",
+      "resolution": "Contrôle de l'archivage de l'ensemble de la documentation",
+      "responsible": "Charlène GHOMSI",
+      "deadline": "",
+      "status": "Exécuté"
+    },
+    {
+      "date": "07/03/2025",
+      "dossier": "PROI",
+      "resolution": "Rédiger le rapport de reporting des activités de transformation digitale",
+      "responsible": "Loïc KAMENI",
+      "deadline": "",
+      "status": "Exécuté"
+    },
+    {
+      "date": "02/05/2025",
+      "dossier": "Etude sur le diagnostic électrique",
+      "resolution": "Présenter le protocole de l'étude au comité d'étude",
+      "responsible": "Boris MAKONG",
+      "deadline": "06/05/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "21/03/2025",
+      "dossier": "Etude sur la filière maïs",
+      "resolution": "Rapport de l'étude",
+      "responsible": "Éric BEIDI",
+      "deadline": "22/05/2025",
+      "status": "Non exécutée"
+    },
+    {
+      "date": "04/04/2025",
+      "dossier": "Diagnostic des packages",
+      "resolution": "Soumission en validation du Mémo de Campagne",
+      "responsible": "Christian KAFO",
+      "deadline": "15/04/2025",
+      "status": "Non exécuté"
+    },
+    {
+      "date": "07/03/2025",
+      "dossier": "Etude sur les importations de riz",
+      "resolution": "Présenter le protocole d'étude au comité d'étude DRI",
+      "responsible": "Éric BEIDI",
+      "deadline": "",
+      "status": "Non exécuté"
+    },
+    {
+      "date": "04/04/2025",
+      "dossier": "Startups digitales",
+      "resolution": "Identification et segmentation de 250 Start up pour l'élaboration d'un business plan",
+      "responsible": "Brice DZANGUE",
+      "deadline": "07/05/2025",
+      "status": "Exécutée"
+    },
+    {
+      "date": "04/04/2025",
+      "dossier": "Solution de suivi des covenants",
+      "resolution": "Collecter 25 millions pour la semaine prochaine",
+      "responsible": "Alexis Brian ELLA",
+      "deadline": "17/04/2025",
+      "status": "Exécutée"
+    },
+    {
+      "date": "04/04/2025",
+      "dossier": "IA Meeting",
+      "resolution": "Rapport de réunion",
+      "responsible": "Emmanuel TEINGA",
+      "deadline": "10/04/2025",
+      "status": "Exécutée"
+    },
+    {
+      "date": "04/04/2025",
+      "dossier": "Commercialisation des plafonds de cartes personnalisées",
+      "resolution": "Présentation de l'idée étude et du Protocole",
+      "responsible": "Brice DZANGUE",
+      "deadline": "10/04/2025",
+      "status": "Exécutée"
+    },
+    {
+      "date": "04/04/2025",
+      "dossier": "Solution de Ticketing",
+      "resolution": "Avoir 50 rapports soumis",
+      "responsible": "Daniel BAYECK",
+      "deadline": "15/04/2025",
+      "status": "Exécutée"
+    },
+    {
+      "date": "21/03/2025",
+      "dossier": "API SARA et Carte prépayée virtuelle",
+      "resolution": "Transmission de l'idée produit",
+      "responsible": "Francis KAMSU",
+      "deadline": "30/04/2025",
+      "status": "Exécutée"
+    },
+    {
+      "date": "04/04/2025",
+      "dossier": "Micro Épargne",
+      "resolution": "Intégration des API de paiements de TrustPay",
+      "responsible": "Jordan KAMSU-KOM",
+      "deadline": "09/04/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "04/04/2025",
+      "dossier": "Solution de Ticketing",
+      "resolution": "Fournir le Template de la structure des documents qui seront utilisés pour le Chat Bot",
+      "responsible": "Daniel BAYECK",
+      "deadline": "10/04/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "21/03/2025",
+      "dossier": "Agence mobile",
+      "resolution": "Fournir une analyse comparative de l'agence mobile par rapport aux dix dernières agences sur le réseau",
+      "responsible": "Franklin TANDJA",
+      "deadline": "24/03/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "07/03/2025",
+      "dossier": "Etude du Mais",
+      "resolution": "Planifier les descentes",
+      "responsible": "Falonne Mounira",
+      "deadline": "18/03/2025",
+      "status": "Exécuté"
+    },
+    {
+      "date": "14/04/2025",
+      "dossier": "Dashboard Prédiction des impayés",
+      "resolution": "Validation des indicateurs",
+      "responsible": "Christian DJIMELI",
+      "deadline": "18/04/2025",
+      "status": "En cours"
+    }
+  ],
+  "sanctions_summary": [
+    {
+      "name": "Gaël KIAMPI",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "14/03/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Jordan KAMSU-KOM",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "14/03/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Emmanuel TEINGA",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "14/03/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Emmanuel TEINGA",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "21/03/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Francis KAMSU",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "14/04/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Jordan KAMSU-KOM",
+      "reason": "Résolution mal reportée",
+      "amount": 2500.0,
+      "date": "11/04/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Alexis Brian",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "11/04/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "ERIC BEIDI",
+      "reason": "Retard",
+      "amount": 5000.0,
+      "date": "04/04/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Nour MAHAMAT",
+      "reason": "Absence",
+      "amount": 5000.0,
+      "date": "16/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "ERIC BEIDI",
+      "reason": "Absence",
+      "amount": 5000.0,
+      "date": "16/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Daniel BAYECK",
+      "reason": "Non-participation a la réunion",
+      "amount": 2500.0,
+      "date": "02/05/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Loïc KAMENI",
+      "reason": "Non-participation a la réunion",
+      "amount": 2500.0,
+      "date": "16/05/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Christian KAFO",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "02/05/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Jules NEMBOT",
+      "reason": "Non-participation a la réunion",
+      "amount": 2500.0,
+      "date": "16/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Charlène GHOMSI",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "09/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Nour MAHAMAT",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "09/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Franklin TANDJA",
+      "reason": "Non-participation a la réunion",
+      "amount": 2500.0,
+      "date": "02/05/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Franklin TANDJA",
+      "reason": "Trouble",
+      "amount": 2500.0,
+      "date": "16/05/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "ERIC BEIDI",
+      "reason": "Absence",
+      "amount": 5000.0,
+      "date": "09/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Brice DZANGUE",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "09/05/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Charlène GHOMSI",
+      "reason": "Non-participation a la réunion",
+      "amount": 2500.0,
+      "date": "02/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Éric BIEDI",
+      "reason": "Non-participation a la réunion",
+      "amount": 2500.0,
+      "date": "02/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Boris MAKONG",
+      "reason": "Non-participation a la réunion",
+      "amount": 2500.0,
+      "date": "02/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Christian KAFO",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "16/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Brice DZANGUE",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "02/05/2025",
+      "status": "$P$"
+    },
+    {
+      "name": "Éric BIEDI",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "02/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Jules NEMBOT",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "23/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Alexis Brian",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "23/05/2025",
+      "status": "NP"
+    }
+  ],
+  "key_highlights": [
+    "Gaël KIAMPI (Président) chaired the meeting with 17 present and 7 absent members.",
+    "Vladimir SOUA (Rapporteur) finalized the analysis for MAMAYAKO SARL and KENNY'S AND CO SARL, with plans to draft the FAR and schedule a Credit Committee.",
+    "Loïc KAMENI is working on the Mil/sorgho study and USSD Sara analysis, awaiting DSI feedback.",
+    "Jordan KAMSUKOM is developing a new dashboard for commercial activities and conducting GFA V2 training.",
+    "Charlène GHOMSI is managing the MINSUP project and awaiting DRB feedback on the cahier de charge.",
+    "Brice DZANGUE is preparing a report on card limits for CPS presentation.",
+    "Franklin TANDJA successfully tested COMEX à distance and is developing Agence Mobile V2 criteria.",
+    "Boris MAKONG is responsible for sending the weekly activity report under penalty of sanctions."
+  ],
+  "miscellaneous": [
+    "The DRI Solidarity account balance was XAF 892,540 as of 23/05/2025.",
+    "Members must submit weekly activity reports by Thursday to participate in Friday meetings.",
+    "Several resolutions remain ongoing, including the deployment of FirstCopilot and the GFA V2 dashboard.",
+    "Sanctions were issued for non-executed resolutions and non-participation, with amounts ranging from 2,500 to 5,000 FCFA."
+  ]
+}
