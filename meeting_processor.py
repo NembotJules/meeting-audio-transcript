@@ -166,38 +166,32 @@ def try_fix_truncated_json(json_str: str) -> str:
 
 def make_mistral_call_with_retry(client, prompt, max_tokens=8000, temperature=0.1, max_retries=3):
     """
-    Make a Mistral API call with retry logic and model fallback.
+    Make a Mistral API call with retry logic using mistral-small-latest.
     """
-    models_to_try = ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"]
-    
     for attempt in range(max_retries):
-        for model in models_to_try:
-            try:
-                print(f"🔄 Attempt {attempt + 1}: Trying model {model}...")
-                response = client.chat.complete(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=temperature,
-                    max_tokens=max_tokens
-                )
-                print(f"✅ Success with model: {model}")
-                return response
-            except Exception as e:
-                error_msg = str(e)
-                if "429" in error_msg or "capacity exceeded" in error_msg:
-                    print(f"⚠️ Rate limit hit for {model}, trying next model...")
-                    time.sleep(2)  # Wait 2 seconds before retry
-                else:
-                    print(f"⚠️ Model {model} failed: {error_msg}")
-                continue
-        
-        # If we get here, all models failed for this attempt
-        if attempt < max_retries - 1:
-            print(f"🔄 All models failed on attempt {attempt + 1}, retrying in 5 seconds...")
-            time.sleep(5)
-        else:
-            print("❌ All models failed after all retry attempts")
-            raise Exception("All Mistral models failed after retries")
+        try:
+            print(f"🔄 Attempt {attempt + 1}: Using mistral-small-latest...")
+            response = client.chat.complete(
+                model="mistral-small-latest",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            print(f"✅ Success with mistral-small-latest")
+            return response
+        except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg or "capacity exceeded" in error_msg:
+                print(f"⚠️ Rate limit hit, retrying in 5 seconds...")
+                time.sleep(5)
+            else:
+                print(f"⚠️ API call failed: {error_msg}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+            
+            if attempt == max_retries - 1:
+                print("❌ All retry attempts failed")
+                raise Exception(f"Mistral API failed after {max_retries} attempts: {error_msg}")
     
     raise Exception("Unexpected error in retry logic")
 

@@ -33,43 +33,32 @@ st.set_page_config(page_title="Meeting Transcription Tool", page_icon=":micropho
 
 def make_mistral_call_with_retry(client, prompt, max_tokens=8000, temperature=0.1, max_retries=3):
     """
-    Make a Mistral API call with retry logic and model fallback.
+    Make a Mistral API call with retry logic using mistral-small-latest.
     """
-    # Get user's preferred model, default to medium if not set
-    default_model = getattr(st.session_state, 'default_mistral_model', 'mistral-medium-latest')
-    
-    # Create model list with user's preference first
-    all_models = ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"]
-    models_to_try = [default_model] + [m for m in all_models if m != default_model]
-    
     for attempt in range(max_retries):
-        for model in models_to_try:
-            try:
-                st.info(f"🔄 Attempt {attempt + 1}: Trying model {model}...")
-                response = client.chat.complete(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=temperature,
-                    max_tokens=max_tokens
-                )
-                st.success(f"✅ Success with model: {model}")
-                return response
-            except Exception as e:
-                error_msg = str(e)
-                if "429" in error_msg or "capacity exceeded" in error_msg:
-                    st.warning(f"⚠️ Rate limit hit for {model}, trying next model...")
-                    time.sleep(2)  # Wait 2 seconds before retry
-                else:
-                    st.warning(f"⚠️ Model {model} failed: {error_msg}")
-                continue
-        
-        # If we get here, all models failed for this attempt
-        if attempt < max_retries - 1:
-            st.warning(f"🔄 All models failed on attempt {attempt + 1}, retrying in 5 seconds...")
-            time.sleep(5)
-        else:
-            st.error("❌ All models failed after all retry attempts")
-            raise Exception("All Mistral models failed after retries")
+        try:
+            st.info(f"🔄 Attempt {attempt + 1}: Using mistral-small-latest...")
+            response = client.chat.complete(
+                model="mistral-small-latest",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            st.success(f"✅ Success with mistral-small-latest")
+            return response
+        except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg or "capacity exceeded" in error_msg:
+                st.warning(f"⚠️ Rate limit hit, retrying in 5 seconds...")
+                time.sleep(5)
+            else:
+                st.warning(f"⚠️ API call failed: {error_msg}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+            
+            if attempt == max_retries - 1:
+                st.error("❌ All retry attempts failed")
+                raise Exception(f"Mistral API failed after {max_retries} attempts: {error_msg}")
     
     raise Exception("Unexpected error in retry logic")
 
@@ -2577,15 +2566,10 @@ def main():
     st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
     st.session_state.elevenlabs_api_key = st.sidebar.text_input("ElevenLabs API Key", type="password")
     
-    # Model selection
+    # Model configuration (simplified)
     st.sidebar.header("Model Configuration")
-    default_model = st.sidebar.selectbox(
-        "Default Mistral Model",
-        ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"],
-        index=1,  # Default to medium
-        help="Choose the default model. The system will fallback to others if this one fails."
-    )
-    st.session_state.default_mistral_model = default_model
+    st.sidebar.info("Using mistral-small-latest for all API calls")
+    st.session_state.default_mistral_model = "mistral-small-latest"
     
     # Show transcript quality tips
     show_transcript_quality_tips()
@@ -2597,13 +2581,11 @@ def main():
     with st.sidebar.expander("🔧 API Status & Tips", expanded=False):
         st.markdown("""
         **Mistral API Status:**
-        - ✅ Large model: Best quality, may hit rate limits
-        - ✅ Medium model: Good balance, recommended default
-        - ✅ Small model: Fastest, most reliable
+        - ✅ Using mistral-small-latest: Fast and reliable
+        - ✅ Automatic retry on rate limits
         
         **Rate Limiting:**
-        - If you get 429 errors, try switching to a smaller model
-        - The system automatically retries with different models
+        - System automatically retries on 429 errors
         - Consider upgrading your Mistral plan for higher limits
         
         **ElevenLabs:**
