@@ -17,6 +17,7 @@ import torchaudio
 import json
 import re
 import base64
+import time
 
 # Try to import tiktoken for accurate token counting; fall back to simple method if unavailable
 try:
@@ -29,6 +30,48 @@ except ImportError:
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Meeting Transcription Tool", page_icon=":microphone:", layout="wide")
+
+def make_mistral_call_with_retry(client, prompt, max_tokens=8000, temperature=0.1, max_retries=3):
+    """
+    Make a Mistral API call with retry logic and model fallback.
+    """
+    # Get user's preferred model, default to medium if not set
+    default_model = getattr(st.session_state, 'default_mistral_model', 'mistral-medium-latest')
+    
+    # Create model list with user's preference first
+    all_models = ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"]
+    models_to_try = [default_model] + [m for m in all_models if m != default_model]
+    
+    for attempt in range(max_retries):
+        for model in models_to_try:
+            try:
+                st.info(f"🔄 Attempt {attempt + 1}: Trying model {model}...")
+                response = client.chat.complete(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+                st.success(f"✅ Success with model: {model}")
+                return response
+            except Exception as e:
+                error_msg = str(e)
+                if "429" in error_msg or "capacity exceeded" in error_msg:
+                    st.warning(f"⚠️ Rate limit hit for {model}, trying next model...")
+                    time.sleep(2)  # Wait 2 seconds before retry
+                else:
+                    st.warning(f"⚠️ Model {model} failed: {error_msg}")
+                continue
+        
+        # If we get here, all models failed for this attempt
+        if attempt < max_retries - 1:
+            st.warning(f"🔄 All models failed on attempt {attempt + 1}, retrying in 5 seconds...")
+            time.sleep(5)
+        else:
+            st.error("❌ All models failed after all retry attempts")
+            raise Exception("All Mistral models failed after retries")
+    
+    raise Exception("Unexpected error in retry logic")
 
 def transcribe_with_elevenlabs(video_file, elevenlabs_api_key):
     """Transcribe the uploaded video file using ElevenLabs API."""
@@ -100,12 +143,7 @@ def combine_transcripts_with_speakers(accurate_transcript, teams_transcript, mis
         Return ONLY the final transcript with speaker names, no additional text or explanations.
         """
         
-        response = client.chat.complete(
-            model="mistral-large-latest",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=8000
-        )
+        response = make_mistral_call_with_retry(client, prompt, max_tokens=8000, temperature=0.1)
         
         final_transcript = response.choices[0].message.content.strip()
         return final_transcript
@@ -223,12 +261,8 @@ def answer_question_with_context(question, context, mistral_api_key):
     
     try:
         client = Mistral(api_key=mistral_api_key)
-        response = client.chat.complete(
-            model="mistral-large-latest",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=500
-        )
+        
+        response = make_mistral_call_with_retry(client, prompt, max_tokens=500, temperature=0.1)
         
         answer = response.choices[0].message.content.strip()
         if "tableau récapitulatif des sanctions" in question.lower():
@@ -879,12 +913,7 @@ def extract_info(transcription, meeting_title, date, mistral_api_key, previous_c
 
     try:
         client = Mistral(api_key=mistral_api_key)
-        response = client.chat.complete(
-            model="mistral-large-latest",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=8000  # Increased to handle larger context
-        )
+        response = make_mistral_call_with_retry(client, prompt, max_tokens=8000, temperature=0.1)
         
         raw_response = response.choices[0].message.content.strip()
         cleaned_response = clean_json_response(raw_response)
@@ -1045,7 +1074,8 @@ def extract_info(transcription, meeting_title, date, mistral_api_key, previous_c
         return extracted_data
 
     except Exception as e:
-        st.error(f"Error extracting info: {e}. Falling back.")
+        st.error(f"Error extracting info: {e}. Falling back to regex-based extraction.")
+        st.info("🔄 Using fallback extraction method (regex-based)")
         return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
 def set_cell_background(cell, rgb_color):
@@ -2542,11 +2572,40 @@ def main():
     st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
     st.session_state.elevenlabs_api_key = st.sidebar.text_input("ElevenLabs API Key", type="password")
     
+    # Model selection
+    st.sidebar.header("Model Configuration")
+    default_model = st.sidebar.selectbox(
+        "Default Mistral Model",
+        ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"],
+        index=1,  # Default to medium
+        help="Choose the default model. The system will fallback to others if this one fails."
+    )
+    st.session_state.default_mistral_model = default_model
+    
     # Show transcript quality tips
     show_transcript_quality_tips()
     
     # Show meeting guidance for better data extraction
     show_meeting_guidance()
+    
+    # Show API status and tips
+    with st.sidebar.expander("🔧 API Status & Tips", expanded=False):
+        st.markdown("""
+        **Mistral API Status:**
+        - ✅ Large model: Best quality, may hit rate limits
+        - ✅ Medium model: Good balance, recommended default
+        - ✅ Small model: Fastest, most reliable
+        
+        **Rate Limiting:**
+        - If you get 429 errors, try switching to a smaller model
+        - The system automatically retries with different models
+        - Consider upgrading your Mistral plan for higher limits
+        
+        **ElevenLabs:**
+        - Supports most video formats
+        - High-quality transcription
+        - Check your quota at elevenlabs.io
+        """)
     
     # Show historical context information
     st.sidebar.header("📊 Historical Context")
