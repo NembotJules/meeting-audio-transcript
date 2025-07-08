@@ -12,7 +12,6 @@ def main():
     # API Keys input
     with st.sidebar:
         mistral_api_key = st.text_input("Mistral API Key", type="password")
-        deepseek_api_key = st.text_input("Deepseek API Key", type="password")
         
         st.markdown("---")
         st.markdown("""
@@ -53,15 +52,14 @@ def main():
         if st.button("Process Meeting Note"):
             if not uploaded_file:
                 st.error("Please upload a file first.")
-            elif not mistral_api_key or not deepseek_api_key:
-                st.error("Please provide both API keys.")
+            elif not mistral_api_key:
+                st.error("Please provide Mistral API key.")
             else:
                 with st.spinner("Processing meeting note..."):
                     try:
                         # Initialize processor with context directory
                         processor = MeetingProcessor(
                             mistral_api_key, 
-                            deepseek_api_key,
                             context_dir="processed_meetings"  # Specify where historical JSONs are stored
                         )
                         

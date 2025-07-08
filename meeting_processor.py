@@ -164,10 +164,10 @@ def try_fix_truncated_json(json_str: str) -> str:
         return json_str
 
 class MeetingProcessor:
-    def __init__(self, mistral_api_key: str, deepseek_api_key: str, context_dir: str = "processed_meetings"):
+    def __init__(self, mistral_api_key: str, context_dir: str = "processed_meetings"):
         """Initialize with necessary API keys and context directory."""
         self.mistral_client = Mistral(api_key=mistral_api_key)
-        self.deepseek_api_key = deepseek_api_key
+        self.mistral_api_key = mistral_api_key
         self.context_dir = context_dir
 
     def load_historical_context(self, max_meetings: int = 3, exclude_date: str = "") -> str:
@@ -585,36 +585,17 @@ Meeting Note:
             raise Exception(f"Failed to extract structured information: {str(e)}")
 
     def _make_api_call(self, prompt: str) -> str:
-        """Make API call to Deepseek and return the response content."""
+        """Make API call to Mistral and return the response content."""
         try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.deepseek_api_key}"
-            }
-            
-            payload = {
-                "model": "deepseek-chat",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "max_tokens": 8000  # Increased from 4000 to handle longer responses
-            }
-            
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers=headers,
-                json=payload
+            response = self.mistral_client.chat.complete(
+                model="mistral-large-latest",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=8000  # Increased from 4000 to handle longer responses
             )
             
-            if response.status_code != 200:
-                raise Exception(f"API error: {response.status_code} - {response.text}")
-            
-            content = response.json()["choices"][0]["message"]["content"].strip()
+            content = response.choices[0].message.content.strip()
             print(f"Raw API response length: {len(content)} characters")
-            
-            # Check if response was truncated
-            finish_reason = response.json()["choices"][0].get("finish_reason", "")
-            if finish_reason == "length":
-                print("WARNING: Response was truncated due to token limit!")
             
             # Clean the JSON response
             cleaned_json = clean_json_response(content)

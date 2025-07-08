@@ -30,6 +30,90 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Meeting Transcription Tool", page_icon=":microphone:", layout="wide")
 
+def transcribe_with_elevenlabs(video_file, elevenlabs_api_key):
+    """Transcribe the uploaded video file using ElevenLabs API."""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{video_file.name.split('.')[-1]}") as temp_video:
+            temp_video.write(video_file.getvalue())
+            temp_video_path = temp_video.name
+        
+        try:
+            # Create transcript using ElevenLabs API
+            response = requests.post(
+                "https://api.elevenlabs.io/v1/speech-to-text?enable_logging=true",
+                headers={
+                    "xi-api-key": elevenlabs_api_key
+                },
+                data={
+                    'model_id': "scribe_v1",
+                },
+                files={
+                    'file': (video_file.name, open(temp_video_path, 'rb')),
+                },
+            )
+            
+            if response.status_code == 200:
+                transcription = response.json()['text']
+                return transcription
+            else:
+                st.error(f"ElevenLabs API error: {response.status_code} - {response.text}")
+                return None
+                
+        finally:
+            os.unlink(temp_video_path)
+    except Exception as e:
+        st.error(f"Error during ElevenLabs transcription: {e}")
+        return None
+
+def combine_transcripts_with_speakers(accurate_transcript, teams_transcript, mistral_api_key):
+    """
+    Combine accurate transcription with Teams transcript to identify speakers.
+    Uses Mistral API to match speakers from Teams transcript with accurate content.
+    """
+    if not accurate_transcript or not teams_transcript or not mistral_api_key:
+        return None
+    
+    try:
+        client = Mistral(api_key=mistral_api_key)
+        
+        prompt = f"""
+        You are an expert at matching speaker names with their spoken content.
+        
+        I have two transcripts of the same meeting:
+        
+        1. ACCURATE TRANSCRIPT (from ElevenLabs) - High quality but no speaker names:
+        {accurate_transcript}
+        
+        2. TEAMS TRANSCRIPT - Lower quality but has speaker names:
+        {teams_transcript}
+        
+        Your task is to create a FINAL TRANSCRIPT that combines the accuracy of the first transcript with the speaker identification from the second transcript.
+        
+        Instructions:
+        1. Use the ACCURATE TRANSCRIPT as the base for content
+        2. Identify speakers from the TEAMS TRANSCRIPT and match them to the corresponding content
+        3. Format the output as: "Speaker Name: [accurate content]"
+        4. Maintain the chronological order
+        5. If you can't identify a speaker for a segment, use "Unknown: [content]"
+        6. Preserve all important details, numbers, dates, and technical terms from the accurate transcript
+        
+        Return ONLY the final transcript with speaker names, no additional text or explanations.
+        """
+        
+        response = client.chat.complete(
+            model="mistral-large-latest",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=8000
+        )
+        
+        final_transcript = response.choices[0].message.content.strip()
+        return final_transcript
+        
+    except Exception as e:
+        st.error(f"Error combining transcripts: {e}")
+        return None
+
 def transcribe_audio(audio_file, file_extension, model_size="base"):
     """Transcribe the uploaded audio file to text using the Whisper model"""
     try:
@@ -120,10 +204,10 @@ def extract_context_from_report(file, mistral_api_key):
         st.error(f"Error processing file with Mistral OCR: {e}")
         return ""
 
-def answer_question_with_context(question, context, deepseek_api_key):
-    """Answer a question based on the extracted context using Deepseek API."""
-    if not context or not question or not deepseek_api_key:
-        return "Please provide a question, context, and Deepseek API key."
+def answer_question_with_context(question, context, mistral_api_key):
+    """Answer a question based on the extracted context using Mistral API."""
+    if not context or not question or not mistral_api_key:
+        return "Please provide a question, context, and Mistral API key."
     
     prompt = f"""
     As an assistant, answer the following question based on the provided context.
@@ -138,26 +222,23 @@ def answer_question_with_context(question, context, deepseek_api_key):
     """
     
     try:
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {deepseek_api_key}"}
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "max_tokens": 500
-        }
-        response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload)
-        if response.status_code == 200:
-            answer = response.json()["choices"][0]["message"]["content"].strip()
-            if "tableau récapitulatif des sanctions" in question.lower():
-                sanctions = parse_sanctions_from_text(answer)
-                if sanctions:
-                    st.session_state.context_sanctions = sanctions
-                    st.sidebar.success(f"Sanctions stored in session state!")
-                else:
-                    st.sidebar.warning("No sanctions found in context")
-            return answer
-        else:
-            return f"API Error: {response.status_code}"
+        client = Mistral(api_key=mistral_api_key)
+        response = client.chat.complete(
+            model="mistral-large-latest",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=500
+        )
+        
+        answer = response.choices[0].message.content.strip()
+        if "tableau récapitulatif des sanctions" in question.lower():
+            sanctions = parse_sanctions_from_text(answer)
+            if sanctions:
+                st.session_state.context_sanctions = sanctions
+                st.sidebar.success(f"Sanctions stored in session state!")
+            else:
+                st.sidebar.warning("No sanctions found in context")
+        return answer
     except Exception as e:
         return f"Error: {e}"
 
@@ -638,9 +719,9 @@ def get_missing_data_from_history(extracted_data, historical_meetings):
     
     return extracted_data
 
-def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_context="", test_mode=False):
-    """Extract key information from the transcription using Deepseek API with historical context."""
-    if not transcription or not deepseek_api_key:
+def extract_info(transcription, meeting_title, date, mistral_api_key, previous_context="", test_mode=False):
+    """Extract key information from the transcription using Mistral API with historical context."""
+    if not transcription or not mistral_api_key:
         return extract_info_fallback(transcription, meeting_title, date, previous_context)
 
     # Load historical meetings for context (allow circular reference in test mode)
@@ -797,26 +878,15 @@ def extract_info(transcription, meeting_title, date, deepseek_api_key, previous_
     """
 
     try:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {deepseek_api_key}"
-        }
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "max_tokens": 8000  # Increased to handle larger context
-        }
-        response = requests.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            headers=headers,
-            json=payload
+        client = Mistral(api_key=mistral_api_key)
+        response = client.chat.complete(
+            model="mistral-large-latest",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=8000  # Increased to handle larger context
         )
-        if response.status_code != 200:
-            st.error(f"Deepseek API error: Status {response.status_code}. Falling back.")
-            return extract_info_fallback(transcription, meeting_title, date, previous_context)
-
-        raw_response = response.json()["choices"][0]["message"]["content"].strip()
+        
+        raw_response = response.choices[0].message.content.strip()
         cleaned_response = clean_json_response(raw_response)
         if not cleaned_response:
             st.error("Failed to clean JSON response. Falling back.")
@@ -2470,7 +2540,7 @@ def main():
     # Sidebar
     st.sidebar.header("Configuration")
     st.session_state.mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
-    st.session_state.deepseek_api_key = st.sidebar.text_input("Deepseek API Key", type="password")
+    st.session_state.elevenlabs_api_key = st.sidebar.text_input("ElevenLabs API Key", type="password")
     
     # Show transcript quality tips
     show_transcript_quality_tips()
@@ -2531,7 +2601,7 @@ def main():
                     st.sidebar.error("Échec de l'extraction.")
             
             with st.spinner("Obtention de la réponse..."):
-                answer = answer_question_with_context(question, st.session_state.previous_context, st.session_state.deepseek_api_key)
+                answer = answer_question_with_context(question, st.session_state.previous_context, st.session_state.mistral_api_key)
             st.sidebar.write("**Réponse :**")
             st.sidebar.write(answer)
     
@@ -2580,9 +2650,62 @@ def main():
     
     with col2:
         st.header("Transcription & Résultat")
-        input_method = st.radio("Méthode d'entrée :", ("Télécharger Audio", "Entrer la Transcription"))
+        input_method = st.radio("Méthode d'entrée :", ("Télécharger Vidéo + Teams", "Télécharger Audio (Whisper)", "Entrer la Transcription"))
         
-        if input_method == "Télécharger Audio":
+        if input_method == "Télécharger Vidéo + Teams":
+            st.info("🎥 **Nouveau workflow:** Upload video for accurate transcription + Teams transcript for speaker names")
+            
+            # Video upload for ElevenLabs
+            video_file = st.file_uploader("Téléchargez la vidéo de la réunion", type=["mp4", "avi", "mov", "mkv", "webm"])
+            
+            # Teams transcript upload
+            teams_transcript = st.text_area("Collez la transcription Teams (avec noms des intervenants)", height=150, 
+                                          help="Copiez-collez la transcription Teams qui contient les noms des intervenants")
+            
+            if video_file and teams_transcript and st.button("Traiter avec ElevenLabs + Mistral"):
+                if not st.session_state.elevenlabs_api_key or not st.session_state.mistral_api_key:
+                    st.error("Veuillez fournir les clés API ElevenLabs et Mistral.")
+                else:
+                    # Step 1: Transcribe with ElevenLabs
+                    with st.spinner("Transcription avec ElevenLabs..."):
+                        accurate_transcript = transcribe_with_elevenlabs(video_file, st.session_state.elevenlabs_api_key)
+                        if accurate_transcript:
+                            st.success("✅ Transcription ElevenLabs terminée!")
+                            with st.expander("📝 Transcription précise (sans noms)"):
+                                st.text_area("Transcription ElevenLabs", accurate_transcript, height=200)
+                            
+                            # Step 2: Combine with Teams transcript
+                            with st.spinner("Combinaison avec la transcription Teams..."):
+                                final_transcript = combine_transcripts_with_speakers(
+                                    accurate_transcript, teams_transcript, st.session_state.mistral_api_key
+                                )
+                                if final_transcript:
+                                    st.session_state.transcription = final_transcript
+                                    st.success("✅ Transcription finale avec noms terminée!")
+                                    st.text_area("Transcription finale avec noms", final_transcript, height=200)
+                                    
+                                    # Step 3: Extract information
+                                    with st.spinner("Extraction des informations avec contexte historique..."):
+                                        allow_circular = getattr(st.session_state, 'test_mode', False)
+                                        if allow_circular:
+                                            st.info("🧪 Test mode: Using existing JSON data for perfect generation")
+                                        
+                                        extracted_info = extract_info(
+                                            final_transcript, meeting_title, meeting_date.strftime("%d/%m/%Y"), 
+                                            st.session_state.mistral_api_key, st.session_state.get("previous_context", ""), allow_circular
+                                        )
+                                        if extracted_info:
+                                            extracted_info = smart_historical_data_filling(extracted_info, meeting_date.strftime("%d/%m/%Y"), allow_circular=allow_circular)
+                                            st.session_state.extracted_info = extracted_info
+                                            st.success("✅ Information extraction completed!")
+                                            with st.expander("📋 View Extracted Information"):
+                                                st.json(extracted_info)
+                                else:
+                                    st.error("❌ Échec de la combinaison des transcriptions")
+                        else:
+                            st.error("❌ Échec de la transcription ElevenLabs")
+        
+        elif input_method == "Télécharger Audio (Whisper)":
             uploaded_file = st.file_uploader("Téléchargez un fichier audio", type=["mp3", "wav", "m4a", "flac"])
             whisper_model = st.selectbox("Modèle Whisper", ["tiny", "base", "small", "medium", "large"], index=1)
             
@@ -2598,33 +2721,29 @@ def main():
                         st.text_area("Transcription résultante", transcription, height=200)
                         
                         with st.spinner("Extraction des informations avec contexte historique..."):
-                            # Use test mode if enabled
                             allow_circular = getattr(st.session_state, 'test_mode', False)
                             if allow_circular:
                                 st.info("🧪 Test mode: Using existing JSON data for perfect generation")
                             
-                            extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""), allow_circular)
+                            extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.mistral_api_key, st.session_state.get("previous_context", ""), allow_circular)
                             if extracted_info:
-                                # Apply smart historical filling with test mode
                                 extracted_info = smart_historical_data_filling(extracted_info, meeting_date.strftime("%d/%m/%Y"), allow_circular=allow_circular)
                                 st.session_state.extracted_info = extracted_info
                                 st.success("✅ Information extraction completed!")
                                 with st.expander("📋 View Extracted Information"):
                                     st.json(extracted_info)
         else:
-            st.info("💡 **Teams Transcript?** Consider uploading the audio file for better quality!")
+            st.info("💡 **Teams Transcript?** Consider uploading the video file for better quality!")
             transcription_input = st.text_area("Entrez la transcription :", height=200, help="Tip: Add speaker names like 'Grace: ...' for better extraction")
             if st.button("Soumettre la Transcription") and transcription_input:
                 st.session_state.transcription = transcription_input
                 with st.spinner("Extraction des informations avec contexte historique..."):
-                    # Use test mode if enabled
                     allow_circular = getattr(st.session_state, 'test_mode', False)
                     if allow_circular:
                         st.info("🧪 Test mode: Using existing JSON data for perfect generation")
                     
-                    extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.deepseek_api_key, st.session_state.get("previous_context", ""), allow_circular)
+                    extracted_info = extract_info(st.session_state.transcription, meeting_title, meeting_date.strftime("%d/%m/%Y"), st.session_state.mistral_api_key, st.session_state.get("previous_context", ""), allow_circular)
                     if extracted_info:
-                        # Apply smart historical filling with test mode  
                         extracted_info = smart_historical_data_filling(extracted_info, meeting_date.strftime("%d/%m/%Y"), allow_circular=allow_circular)
                         st.session_state.extracted_info = extracted_info
                         st.success("✅ Information extraction completed!")
