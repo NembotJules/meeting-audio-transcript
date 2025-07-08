@@ -754,7 +754,12 @@ def get_missing_data_from_history(extracted_data, historical_meetings):
     return extracted_data
 
 def extract_info(transcription, meeting_title, date, mistral_api_key, previous_context="", test_mode=False):
-    """Extract key information from the transcription using Mistral API with historical context."""
+    """Extract key information from the transcription using Mistral API with historical context.
+    
+    This function is used for LIVE meeting processing and DOES use historical context
+    to understand continuity and ongoing activities. This is different from the
+    historical processor which extracts from documents WITHOUT using context.
+    """
     if not transcription or not mistral_api_key:
         return extract_info_fallback(transcription, meeting_title, date, previous_context)
 

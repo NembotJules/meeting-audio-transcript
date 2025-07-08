@@ -395,6 +395,187 @@ class MeetingProcessor:
         except Exception as e:
             raise Exception(f"Error extracting text from document: {str(e)}")
 
+    def extract_structured_info_from_document_only(self, text: str, meeting_date: str, meeting_title: str) -> Dict:
+        """
+        Extract structured information from document text WITHOUT using historical context.
+        This is for processing historical documents to build the initial database.
+        
+        Args:
+            text: Extracted text from document
+            meeting_date: Date of the meeting
+            meeting_title: Title of the meeting
+            
+        Returns:
+            Structured meeting information as JSON
+        """
+        def safe_parse_json(json_str: str, default_value: Dict) -> Dict:
+            """Safely parse JSON with fallback to default value."""
+            if not json_str:
+                return default_value
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError as e:
+                print(f"JSON parsing error: {str(e)}")
+                print(f"Problematic JSON: {json_str}")
+                return default_value
+
+        try:
+            # NO historical context - extract only from the document itself
+            print("Processing document WITHOUT historical context (building initial database)")
+
+            # Define expected team members
+            expected_members = [
+                "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
+                "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
+                "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
+                "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
+                "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
+                "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
+                "Charlène GHOMSI"
+            ]
+
+            # 1. Extract attendance (no historical context)
+            attendance_prompt = f"""
+Extract ONLY the attendance information from the meeting note.
+Expected team members: {', '.join(expected_members)}
+Return as two lists in this EXACT format (no other text):
+{{"present": ["name1", "name2"], "absent": ["name3", "name4"]}}
+
+Meeting Note:
+{text}
+"""
+            attendance_response = self._make_api_call(attendance_prompt)
+            attendance_data = safe_parse_json(attendance_response, {"present": [], "absent": []})
+
+            # 2. Extract agenda items with proper French defaults
+            agenda_prompt = f"""
+Extract ONLY the agenda items from the meeting note.
+IMPORTANT: Unless explicitly mentioned differently, use these French defaults:
+- "I- Relecture du Compte Rendu"
+- "II- Récapitulatif des Résolutions et des Sanctions"
+- "III- Revue d'activités"
+- "IV- Faits Saillants"
+- "V- Divers"
+
+Return as a list in this EXACT format (no other text):
+{{"agenda_items": ["I- Relecture du Compte Rendu", "II- Récapitulatif des Résolutions et des Sanctions", "III- Revue d'activités", "IV- Faits Saillants", "V- Divers"]}}
+
+Meeting Note:
+{text}
+"""
+            agenda_response = self._make_api_call(agenda_prompt)
+            agenda_data = safe_parse_json(agenda_response, {"agenda_items": [
+                "I- Relecture du Compte Rendu",
+                "II- Récapitulatif des Résolutions et des Sanctions", 
+                "III- Revue d'activités",
+                "IV- Faits Saillants",
+                "V- Divers"
+            ]})
+
+            # 3. Extract activities review (no historical context)
+            activities_prompt = f"""
+Extract ONLY the activities review from the meeting note.
+CRITICAL: Create entries for ALL expected team members: {', '.join(expected_members)}
+- If a member is not mentioned, use "RAS" for activities, results, and perspectives
+- Extract ONLY what is mentioned in this specific document
+
+Return as a list of objects in this EXACT format (no other text):
+{{"activities_review": [
+    {{"actor": "name", "dossier": "text", "activities": "text", "results": "text", "perspectives": "text"}}
+]}}
+
+Meeting Note:
+{text}
+"""
+            activities_response = self._make_api_call(activities_prompt)
+            activities_data = safe_parse_json(activities_response, {"activities_review": []})
+
+            # Ensure all expected members are included
+            mentioned_actors = {activity.get("actor", "") for activity in activities_data.get("activities_review", [])}
+            complete_activities = list(activities_data.get("activities_review", []))
+            
+            for member in expected_members:
+                if member not in mentioned_actors:
+                    complete_activities.append({
+                        "actor": member,
+                        "dossier": "Non spécifié",
+                        "activities": "RAS",
+                        "results": "RAS",
+                        "perspectives": "RAS"
+                    })
+            
+            activities_data["activities_review"] = complete_activities
+
+            # 4. Extract resolutions (no historical context)
+            resolutions_prompt = f"""
+Extract ONLY the resolutions from the meeting note.
+Return as a list of objects in this EXACT format (no other text):
+{{"resolutions_summary": [
+    {{"date": "{meeting_date}", "dossier": "text", "resolution": "text", "responsible": "name", "deadline": "DD/MM/YYYY", "status": "text"}}
+]}}
+
+Meeting Note:
+{text}
+"""
+            resolutions_response = self._make_api_call(resolutions_prompt)
+            resolutions_data = safe_parse_json(resolutions_response, {"resolutions_summary": []})
+
+            # 5. Extract sanctions (no historical context)
+            sanctions_prompt = f"""
+Extract ONLY the sanctions from the meeting note.
+Return as a list of objects in this EXACT format (no other text):
+{{"sanctions_summary": [
+    {{"name": "text", "reason": "text", "amount": "number", "date": "{meeting_date}", "status": "text"}}
+]}}
+
+Meeting Note:
+{text}
+"""
+            sanctions_response = self._make_api_call(sanctions_prompt)
+            sanctions_data = safe_parse_json(sanctions_response, {"sanctions_summary": []})
+
+            # 6. Extract miscellaneous items (no historical context)
+            misc_prompt = f"""
+Extract ONLY miscellaneous items and key highlights from the meeting note.
+Return in this EXACT format (no other text):
+{{"key_highlights": ["item1", "item2"], "miscellaneous": ["item1", "item2"]}}
+
+Meeting Note:
+{text}
+"""
+            misc_response = self._make_api_call(misc_prompt)
+            misc_data = safe_parse_json(misc_response, {"key_highlights": [], "miscellaneous": []})
+
+            # Combine all data with proper error handling
+            combined_data = {
+                "meeting_metadata": {
+                    "date": meeting_date,
+                    "title": meeting_title
+                },
+                "attendance": attendance_data,
+                "agenda_items": agenda_data.get("agenda_items", [
+                    "I- Relecture du Compte Rendu",
+                    "II- Récapitulatif des Résolutions et des Sanctions",
+                    "III- Revue d'activités", 
+                    "IV- Faits Saillants",
+                    "V- Divers"
+                ]),
+                "activities_review": activities_data.get("activities_review", []),
+                "resolutions_summary": resolutions_data.get("resolutions_summary", []),
+                "sanctions_summary": sanctions_data.get("sanctions_summary", []),
+                "key_highlights": misc_data.get("key_highlights", []),
+                "miscellaneous": misc_data.get("miscellaneous", [])
+            }
+
+            # Validate the combined data
+            return self.validate_meeting_json(combined_data)
+
+        except Exception as e:
+            print(f"\nProcessing Error:")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
+            raise Exception(f"Failed to extract structured information: {str(e)}")
+
     def extract_structured_info(self, text: str, meeting_date: str, meeting_title: str) -> Dict:
         """
         Extract structured information from text using LLM with historical context.
@@ -708,6 +889,8 @@ Meeting Note:
     def process_historical_meeting(self, file, meeting_date: str, meeting_title: str) -> Dict:
         """
         Process a historical meeting document end-to-end.
+        This method extracts information ONLY from the uploaded document, without using historical context.
+        This is used to build the initial database of meeting data.
         
         Args:
             file: File object (PDF, PNG, JPG, JPEG)
@@ -721,8 +904,8 @@ Meeting Note:
             # Extract text from document
             extracted_text = self.extract_text_from_document(file)
             
-            # Extract structured information
-            structured_data = self.extract_structured_info(
+            # Extract structured information WITHOUT historical context
+            structured_data = self.extract_structured_info_from_document_only(
                 extracted_text,
                 meeting_date,
                 meeting_title

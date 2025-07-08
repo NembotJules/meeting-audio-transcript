@@ -9,6 +9,23 @@ st.set_page_config(page_title="Historical Meeting Processor", layout="wide")
 def main():
     st.title("Historical Meeting Notes Processor")
     
+    # Add clear explanation of purpose
+    st.markdown("""
+    ## 🎯 **Purpose of This Tool**
+    
+    This tool is used to **build the initial database** of meeting data by processing existing meeting documents (PDFs/images).
+    
+    ### **When to Use This Tool:**
+    1. **Initial Setup**: Process old meeting notes to create the first set of JSON files
+    2. **Add Missing Meetings**: If you have old meeting documents that weren't processed
+    3. **Re-process Poor Quality Data**: If existing JSONs have errors, re-process the original documents
+    
+    ### **Important Note:**
+    - This tool extracts information **ONLY from the uploaded document**
+    - It does **NOT use historical context** to avoid circular logic
+    - The extracted data will be used as context for future live meeting processing
+    """)
+    
     # API Keys input
     with st.sidebar:
         mistral_api_key = st.text_input("Mistral API Key", type="password")
@@ -22,6 +39,23 @@ def main():
         4. Process the document
         5. Review and save the extracted data
         """)
+        
+        # Show current database status
+        st.markdown("---")
+        st.markdown("### 📊 Current Database Status")
+        try:
+            import os
+            if os.path.exists("processed_meetings"):
+                json_files = [f for f in os.listdir("processed_meetings") if f.endswith('.json')]
+                st.success(f"✅ {len(json_files)} meetings in database")
+                for file in json_files[:5]:  # Show first 5
+                    st.write(f"• {file}")
+                if len(json_files) > 5:
+                    st.write(f"... and {len(json_files) - 5} more")
+            else:
+                st.warning("⚠️ No database found. This will create the initial database.")
+        except Exception as e:
+            st.error(f"Error checking database: {e}")
     
     # Main content
     col1, col2 = st.columns([1, 1])
@@ -55,7 +89,7 @@ def main():
             elif not mistral_api_key:
                 st.error("Please provide Mistral API key.")
             else:
-                with st.spinner("Processing meeting note..."):
+                with st.spinner("Processing meeting note (extracting from document only)..."):
                     try:
                         # Initialize processor with context directory
                         processor = MeetingProcessor(
@@ -63,7 +97,7 @@ def main():
                             context_dir="processed_meetings"  # Specify where historical JSONs are stored
                         )
                         
-                        st.info("Loading historical context from previous meetings...")
+                        st.info("🔄 Extracting information from document only (no historical context used)")
                         
                         # Process the document
                         extracted_data = processor.process_historical_meeting(
@@ -74,7 +108,7 @@ def main():
                         
                         # Store in session state
                         st.session_state.extracted_data = extracted_data
-                        st.success("Meeting note processed successfully with historical context!")
+                        st.success("✅ Meeting note processed successfully! (Document-only extraction)")
                         
                     except Exception as e:
                         st.error(f"Error processing meeting note: {str(e)}")
@@ -128,7 +162,7 @@ def main():
             if st.button("Save Extracted Data"):
                 try:
                     filepath = save_meeting_data(data, "processed_meetings")
-                    st.success(f"Data saved to {filepath}")
+                    st.success(f"✅ Data saved to {filepath}")
                     
                     # Offer download
                     with open(filepath, 'r', encoding='utf-8') as f:
@@ -139,6 +173,9 @@ def main():
                         file_name=filepath.split("/")[-1],
                         mime="application/json"
                     )
+                    
+                    # Refresh sidebar
+                    st.rerun()
                     
                 except Exception as e:
                     st.error(f"Error saving data: {str(e)}")
