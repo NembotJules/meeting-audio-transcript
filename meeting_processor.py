@@ -960,7 +960,19 @@ def get_historical_resolution_date(dossier, responsible, resolution_text, contex
                         continue
                 
                 # Parse date from filename for proper chronological sorting
-                parsed_date = self.parse_date_from_filename(file)
+                def parse_date_from_filename(filename):
+                    """Parse date from filename format: meeting_DD-MM-YYYY_Réunion_DRI.json"""
+                    try:
+                        # Extract date part from filename like "meeting_23-05-2025_Réunion_DRI.json"
+                        if filename.startswith("meeting_") and filename.endswith("_Réunion_DRI.json"):
+                            date_part = filename.replace("meeting_", "").replace("_Réunion_DRI.json", "")
+                            # Convert DD-MM-YYYY to datetime for proper sorting
+                            return datetime.strptime(date_part, "%d-%m-%Y")
+                    except:
+                        pass
+                    return None
+                
+                parsed_date = parse_date_from_filename(file)
                 if parsed_date:
                     json_files.append((parsed_date, filepath, file))
                 else:
