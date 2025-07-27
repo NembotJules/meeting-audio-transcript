@@ -1,0 +1,959 @@
+{
+  "meeting_metadata": {
+    "date": "11/07/2025",
+    "title": "Réunion DRI"
+  },
+  "attendance": {
+    "present": [
+      "Amelin EPOH",
+      "Franklin YOUMBI",
+      "Christian DJIMELI",
+      "Daniel BAYECK",
+      "Sherelle KANA",
+      "Cédric DONFACK",
+      "Wilfried DOPGANG",
+      "Gaël KIAMPI",
+      "Franklin TANDJA",
+      "Vladimir SOUA",
+      "Charlène GHOMSI",
+      "Francis KAMSU",
+      "Jules NEMBOT",
+      "Jordan KAMSU-KOM",
+      "NDE Grace Divine",
+      "KANKEU Cedric",
+      "FOMEKONG Gaetan",
+      "BORIS MAKONG",
+      "Loïc KAMENI",
+      "Nour MAHAMAT",
+      "Brian ELLA ELLA",
+      "Emmanuel TEINGA",
+      "Vianney NENGOUEYE",
+      "Gilles NGUIMAPI",
+      "Laurent AMBASSA",
+      "André TSIMI"
+    ],
+    "absent": [
+      "Brice DZANGUE",
+      "Ismaël POUNGOUM",
+      "Marcellin SEUJIP",
+      "Éric BEIDI"
+    ]
+  },
+  "agenda_items": [
+    "I- Relecture du compte rendu et adoption",
+    "II- Récapitulatif des résolutions et sanctions",
+    "III- Revue d'activités",
+    "IV- Faits saillants",
+    "V- Divers"
+  ],
+  "activities_review": [
+    {
+      "actor": "Vladimir SOUA",
+      "dossier": "MAMAYACO Sarl",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Présenter ce dossier au comité de crédit après avis du risque et conformité"
+    },
+    {
+      "actor": "Vladimir SOUA",
+      "dossier": "FOGAJEUNE",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Rapport du comité de crédit de Garantie mardi 10h"
+    },
+    {
+      "actor": "Vladimir SOUA",
+      "dossier": "Elite Capital Security",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Recueillir les informations et transmettre la fiche aux engagements"
+    },
+    {
+      "actor": "NDE Grace Divine",
+      "dossier": "ADAF",
+      "activities": "PV disponible",
+      "results": "Mise en place",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "NDE Grace Divine",
+      "dossier": "RAFMAC",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Comité de crédit"
+    },
+    {
+      "actor": "NDE Grace Divine",
+      "dossier": "SITRACEL",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Transmission de la fiche au risque"
+    },
+    {
+      "actor": "NDE Grace Divine",
+      "dossier": "COMPLEXE GALAXY Sarl",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Accord des différentes directions"
+    },
+    {
+      "actor": "NDE Grace Divine",
+      "dossier": "BENDEL",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Organiser la visite et transmettre la fiche"
+    },
+    {
+      "actor": "NDE Grace Divine",
+      "dossier": "L'huile de palme",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Faire valider le protocole d'étude par le Directeur de la DRI."
+    },
+    {
+      "actor": "André TSIMI",
+      "dossier": "Offre de service SONAMINES",
+      "activities": "Pas de résultats",
+      "results": "Pas de résultats",
+      "perspectives": "Faire le rapport des échanges avec le responsable de la SONAMINES"
+    },
+    {
+      "actor": "André TSIMI",
+      "dossier": "Dossier GALUNOLE AND PARTNERS",
+      "activities": "Retours FAR",
+      "results": "Retours FAR",
+      "perspectives": "Finalisation de la fiche d'analyse"
+    },
+    {
+      "actor": "André TSIMI",
+      "dossier": "Campagne collecte des ressources dans le secteur de l'or",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Intégrer les recommandations du comité d'études du département et présenter au comité d'études de la DRI"
+    },
+    {
+      "actor": "André TSIMI",
+      "dossier": "Schéma de financement des opticiens",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Proposer un schéma de financement"
+    },
+    {
+      "actor": "Rosa AYENE",
+      "dossier": "Etude sur l'huile de palme",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Faire valider le protocole d'étude par le Directeur de la DRI"
+    },
+    {
+      "actor": "Rosa AYENE",
+      "dossier": "Système de suivi de paiement et de recouvrement des créances",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Valider le document d'idée projet par le comité d'étude"
+    },
+    {
+      "actor": "Gaétan FOMEKONG",
+      "dossier": "Family Food",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Validation du dossier de crédit par le comité d'étude DRI (Délai 01 mois)\nSoumettre la FAR (Aujourd'hui) Valider l'étude au comité des études (délai jeudi)"
+    },
+    {
+      "actor": "Gaétan FOMEKONG",
+      "dossier": "Campagne de mobilisation des ressources secteur du CACAO",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Soumettre l'idée d'étude au département des études. (Mardi le 16/07)"
+    },
+    {
+      "actor": "Nour MAHAMAT",
+      "dossier": "EMPIRE OF LEADERS SARL",
+      "activities": "La validation du dossier de financement 50 millions",
+      "results": "La validation du dossier de financement 50 millions",
+      "perspectives": "Modifier le PV et faire la mise en place"
+    },
+    {
+      "actor": "Nour MAHAMAT",
+      "dossier": "SONAMINES",
+      "activities": "Validation du dossier de financement par le DRI et DRB",
+      "results": "Validation du dossier de financement par le DRI et DRB",
+      "perspectives": "Transmettre l'offre à la SONAMINES et suivre l'offre"
+    },
+    {
+      "actor": "Nour MAHAMAT",
+      "dossier": "Reserve Market",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Terminer la fiche et la transmettre"
+    },
+    {
+      "actor": "Laurent AMBASSA",
+      "dossier": "Mise en place d'une plateforme digitale de simulation de crédit",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Valider l'idée d'étude par le comité des études"
+    },
+    {
+      "actor": "Laurent AMBASSA",
+      "dossier": "Digitalisation RH",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Finaliser la mise à jour de l'idée projet qui intégrera toutes les fonctionnalités"
+    },
+    {
+      "actor": "Laurent AMBASSA",
+      "dossier": "Collecte automatique de la satisfaction clientèle",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Valider l'idée projet"
+    },
+    {
+      "actor": "Laurent AMBASSA",
+      "dossier": "Thinking Times (Charte de projet, et établissement financières et non financières)",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Effectuer les Thinking times"
+    },
+    {
+      "actor": "Loïc KAMENI",
+      "dossier": "Enquête sur le marchand Momo",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Fournir le rapport de l'enquête la semaine prochaine (prochaine réunion hebdomadaire)"
+    },
+    {
+      "actor": "Loïc KAMENI",
+      "dossier": "Mil SORGHO",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Finaliser la liste des collecteurs la semaine prochaine"
+    },
+    {
+      "actor": "Loïc KAMENI",
+      "dossier": "Dashboard mesurant l'impact de la transformation digitale des processus.",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Organiser un Brainstorming afin de lever les blocages"
+    },
+    {
+      "actor": "Vianney NENGOUEYE",
+      "dossier": "Etude pour l'extension de la fenêtre islamique dans le réseau de l'EST",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Présenter les rapports d'études"
+    },
+    {
+      "actor": "Vianney NENGOUEYE",
+      "dossier": "Gestion de la trésorerie du coffre Hippodrome",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Conception de la solution"
+    },
+    {
+      "actor": "Vianney NENGOUEYE",
+      "dossier": "Chatbot d'assistance clientèle et de gestion des réclamations",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Valider l'idée projet"
+    },
+    {
+      "actor": "Jordan KAMSU-KOM",
+      "dossier": "Nouvelle version du dashboard de reporting des activités commerciales",
+      "activities": "Publication du dashboard",
+      "results": "Publication du dashboard",
+      "perspectives": "Correction et ajustement des indicateurs"
+    },
+    {
+      "actor": "Jordan KAMSU-KOM",
+      "dossier": "Automate de mise à jour des dashboards",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Automatiser la mise à jour du dashbord et de la balance agée Jeudi prochain"
+    },
+    {
+      "actor": "Jordan KAMSU-KOM",
+      "dossier": "Nouvelles versions du GFA",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "Rapport du test de l'ensemble de fonctionnalités"
+    },
+    {
+      "actor": "Christian DJIMELI",
+      "dossier": "Système d'alerte précoce des impayés",
+      "activities": "18 GFC relancés\nBaisse des impayés de 6,2%",
+      "results": "18 GFC relancés\nBaisse des impayés de 6,2%",
+      "perspectives": "Relance des autres GFC\nFaire le point de situation afin d'avoir une nouvelle stratégie pour pouvoir être plus efficace. Et effectuer les relances à partir de la semaine prochaine"
+    },
+    {
+      "actor": "Daniel BAYECK",
+      "dossier": "Gestion des réclamations par fisrt copilote périmètre la région du nord",
+      "activities": "Obtention de 10 licences pour 21 jours",
+      "results": "Obtention de 10 licences pour 21 jours",
+      "perspectives": "Démarrer la phase test des licences obtenues pour la gestion des réclamations en interne à travers FirstCopilot"
+    },
+    {
+      "actor": "Daniel BAYECK",
+      "dossier": "Portail centralisé en vu de suivre les activités sur FirstCopilot",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Achever la mise ne place du portail Jeudi, finaliser la phase pilote"
+    },
+    {
+      "actor": "Daniel BAYECK",
+      "dossier": "Recenser et mettre à jour les Dashboard",
+      "activities": "Mise à jour des Dashboards validés",
+      "results": "Mise à jour des Dashboards validés",
+      "perspectives": "Faire le recensement global de tous les Dashbord de la DRI"
+    },
+    {
+      "actor": "Charlène GHOMSI",
+      "dossier": "Projet MINSUP",
+      "activities": "Test effectué sur les comptes de la DRB",
+      "results": "Test effectué sur les comptes de la DRB",
+      "perspectives": "Préparer une campagne pour déployer les SARA marchant auprès des universités"
+    },
+    {
+      "actor": "Charlène GHOMSI",
+      "dossier": "Digitalisation des processus RH",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Cahier des charges la semaine prochaine"
+    },
+    {
+      "actor": "Gilles NGUIMAPI",
+      "dossier": "Cartes virtuelles prépayés",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Validation du plan commerciale"
+    },
+    {
+      "actor": "Gilles NGUIMAPI",
+      "dossier": "Produit de bancassurance bora",
+      "activities": "Pas résultat",
+      "results": "Pas résultat",
+      "perspectives": "Vente BORA à titre de produit spécifiques de la banque"
+    },
+    {
+      "actor": "Gilles NGUIMAPI",
+      "dossier": "FirstCopilot coté GFC et AOB",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Déploiement de FirstCopilot auprès des GFC et AOB"
+    },
+    {
+      "actor": "Boris MAKONG",
+      "dossier": "Déploiement GFA V2",
+      "activities": "81 agences déployées sur 91.",
+      "results": "81 agences déployées sur 91.",
+      "perspectives": "Résolution permanente"
+    },
+    {
+      "actor": "Boris MAKONG",
+      "dossier": "Plateforme de gestion des demandes relative au crédit",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Revenir la semaine prochaine avec pour présenter les objectifs de suivis pour la plateforme"
+    },
+    {
+      "actor": "Boris MAKONG",
+      "dossier": "Dashboard de suivis de e-fist",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Boris MAKONG",
+      "dossier": "Calendrier sécurisation des postes GFA",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "6/7/2025"
+    },
+    {
+      "actor": "Brian ELLA ELLA",
+      "dossier": "Suivis des covenant",
+      "activities": "641 Millions et 377 Million 04/07/2025",
+      "results": "641 Millions et 377 Million 04/07/2025",
+      "perspectives": "Terminer la mise à jour du Dashboard"
+    },
+    {
+      "actor": "Brian ELLA ELLA",
+      "dossier": "Dashboard des TPE",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Terminer le Dashboard (Jeudi prochain)"
+    },
+    {
+      "actor": "Brian ELLA ELLA",
+      "dossier": "Comex à distance",
+      "activities": "11 transferts",
+      "results": "11 transferts",
+      "perspectives": "Mise à jour de la solution et l'étendre à 40 nouveaux clients et avoir un taux d'adoption de 30% des transfert par le canal"
+    },
+    {
+      "actor": "Francis KAMSU",
+      "dossier": "Tableau de bord de la conformité",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Finaliser avec les travaux du Dashboard"
+    },
+    {
+      "actor": "Francis KAMSU",
+      "dossier": "Suivi des idées du département",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Finaliser avec le dossier ce Weekends"
+    },
+    {
+      "actor": "Sherelle KANA",
+      "dossier": "Vérification des dossiers clients (voyages hors CEMAC)",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Mettre en place l'environnement qui permet de vérifier ces dossiers clients là et vérifier au moins 20 dossiers"
+    },
+    {
+      "actor": "Sherelle KANA",
+      "dossier": "Optimisation du filtrage des transactions",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Entraîner les différents modèles sélectionnés (évaluation de la maitrise des modèles entraînés)"
+    },
+    {
+      "actor": "Jules NEMBOT",
+      "dossier": "Dashboard back office SARA pour les marchands",
+      "activities": "Pas de résultat",
+      "results": "Pas de résultat",
+      "perspectives": "Fournir le rapport opérationnel (Jeudi prochain)"
+    },
+    {
+      "actor": "Jules NEMBOT",
+      "dossier": "Extraction automatique des cours de changes sur le site de la BEAC",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "Pouvoir envoyer automatiquement le fichier"
+    },
+    {
+      "actor": "Cédric KANKEU",
+      "dossier": "Impact de l'absence du réseau sur le service",
+      "activities": "Pas résultat",
+      "results": "Pas résultat",
+      "perspectives": "Rédiger et faire valider le protocole d'étude"
+    },
+    {
+      "actor": "Cédric KANKEU",
+      "dossier": "Respect des conditions de banque",
+      "activities": "Pas résultat",
+      "results": "Pas résultat",
+      "perspectives": "Valider l'idée d'étude"
+    },
+    {
+      "actor": "Emmanuel TEINGA",
+      "dossier": "TPE",
+      "activities": "4144 Opérations la semaine dernière\n15 Dossiers de TPE ont pris 06 jours\n3855 opérations pour 178 millions\n10 TPE ayant une activité prolongée\n1939 opérations qui n'ont pas été rétrocédées aux marchands",
+      "results": "4144 Opérations la semaine dernière\n15 Dossiers de TPE ont pris 06 jours\n3855 opérations pour 178 millions\n10 TPE ayant une activité prolongée\n1939 opérations qui n'ont pas été rétrocédées aux marchands",
+      "perspectives": "Terminer la conception du Dashboard\nFaire le point et Prendre en compte les observations du comité de management\nSaisir la DOB et la DSI pour régularisation des opérations qui n'ont pas été rétrocédées aux marchands"
+    },
+    {
+      "actor": "Emmanuel TEINGA",
+      "dossier": "Suivis des GAB",
+      "activities": "58% de disponibilité des GAB",
+      "results": "58% de disponibilité des GAB",
+      "perspectives": "Préciser le périmètre et la plusvalue\nMettre sur pied un Dashboard de monitoring et de suivi de la disponibilité des GABs"
+    },
+    {
+      "actor": "Grace Divine",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Vladimir SOUA",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Gaël KIAMPI",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Emmanuel TEINGA",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Francis KAMSU",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Jordan KAMSU-KOM",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Loïc KAMENI",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Christian DJIMELI",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Daniel BAYECK",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Sherelle KANA",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Jules NEMBOT",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Nour MAHAMAT",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Franklin TANDJA",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Marcellin SEUJIP",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Divine NDE",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Brian ELLA ELLA",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Amelin EPOH",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Franklin YOUMBI",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Cédric DONFACK",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Wilfried DOPGANG",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Ismaël POUNGOUM",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Éric BEIDI",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Boris ON MAKONG",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Charlène GHOMSI",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "André TSIMI",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Gilles NGUIMAPI",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Cédric KANKEU",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Vianney NENGOUEYE",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Laurent AMBASSA",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Gaetan FOMEKONG",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Rosa AYENE",
+      "dossier": "RAS",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Gael KIAMPI",
+      "dossier": "Non spécifié",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    },
+    {
+      "actor": "Brice DZANGUE",
+      "dossier": "Non spécifié",
+      "activities": "RAS",
+      "results": "RAS",
+      "perspectives": "RAS"
+    }
+  ],
+  "resolutions_summary": [
+    {
+      "date": "11/07/2025",
+      "dossier": "Prospection projet investissement",
+      "resolution": "Proposer un plan de prospection des projets d'investissement",
+      "responsible": "Vladimir SOUA",
+      "deadline": "17/07/2025",
+      "status": "Non exécuté"
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Déploiement GFA",
+      "resolution": "Déployer le dashboard avec le volet accueil sans manipulation des fonds",
+      "responsible": "Francis KAMSU",
+      "deadline": "17/07/2025",
+      "status": ""
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Suivi des TPE",
+      "resolution": "Finaliser le mémo de campagne et le dashboard",
+      "responsible": "Brian Ella",
+      "deadline": "17/07/2025",
+      "status": "Non exécuté"
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Produit de bancassurance BORA",
+      "resolution": "Présenter l'idée produit au CPS",
+      "responsible": "Gilles NGUIMAPI",
+      "deadline": "21/07/2025",
+      "status": "Non exécuté"
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Dashboard marchant SARA",
+      "resolution": "Fournir le rapport opérationnel",
+      "responsible": "Jules NEMBOT",
+      "deadline": "17/07/2025",
+      "status": ""
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Extraction automatique des cours de changes sur le site de la BEAC",
+      "resolution": "Envoyer automatiquement le fichier que les membres de la trésorerie envoient",
+      "responsible": "Jules NEMBOT",
+      "deadline": "18/07/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Système de suivi de paiement et de recouvrement des créances",
+      "resolution": "Présentation au comité d'étude",
+      "responsible": "Rosa AYENE",
+      "deadline": "17/07/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Dossier GALUNOLE AND PARTNERS",
+      "resolution": "Rédaction et transmission de l'accusé de réception au client",
+      "responsible": "André TSIMI",
+      "deadline": "17/07/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Collecte des ressources dans le secteur de l'or",
+      "resolution": "Evaluation du potentiel de la zone et transmission au comité d'études DRI",
+      "responsible": "André TSIMI",
+      "deadline": "17/07/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Simulateur de crédit",
+      "resolution": "Présentation au comité d'étude",
+      "responsible": "Laurent AMBASSA",
+      "deadline": "17/07/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Chatbot d'assistance clientèle et de gestion des réclamations",
+      "resolution": "Présentation de l'idée projet au comité d'étude",
+      "responsible": "Vianney NENGOUEYE",
+      "deadline": "17/07/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Dossier de crédit d'une boulangerie",
+      "resolution": "Validation au comité de crédit",
+      "responsible": "Nour MAHAMAT",
+      "deadline": "07/08/2025",
+      "status": "En cours"
+    },
+    {
+      "date": "11/07/2025",
+      "dossier": "Impact de l'absence du réseau sur le service",
+      "resolution": "Présentation du protocole d'étude au comité d'étude",
+      "responsible": "Cédric KANKEU",
+      "deadline": "17/07/2025",
+      "status": "En cours"
+    }
+  ],
+  "sanctions_summary": [
+    {
+      "name": "ERIC BEIDI",
+      "reason": "Retard",
+      "amount": 5000.0,
+      "date": "04/04/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Nour MAHAMAT",
+      "reason": "Absence",
+      "amount": 5000.0,
+      "date": "16/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "ERIC BEIDI",
+      "reason": "Absence",
+      "amount": 5000.0,
+      "date": "16/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Jules NEMBOT",
+      "reason": "Non-participation a la réunion",
+      "amount": 2500.0,
+      "date": "16/05/2025",
+      "status": "Payé"
+    },
+    {
+      "name": "Charlène GHOMSI",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "09/05/2025",
+      "status": "Payé"
+    },
+    {
+      "name": "Nour MAHAMAT",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "09/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "ERIC BEIDI",
+      "reason": "Absence",
+      "amount": 10000.0,
+      "date": "09/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Charlène GHOMSI",
+      "reason": "Non-participation a la réunion",
+      "amount": 2500.0,
+      "date": "02/05/2025",
+      "status": "Payé"
+    },
+    {
+      "name": "Éric BIEDI",
+      "reason": "Non-participation a la réunion",
+      "amount": 5000.0,
+      "date": "02/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Boris MAKONG",
+      "reason": "Non-participation a la réunion",
+      "amount": 5000.0,
+      "date": "02/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Christian KAFO",
+      "reason": "Résolution non exécutée",
+      "amount": 10000.0,
+      "date": "16/05/2025",
+      "status": "Payé"
+    },
+    {
+      "name": "Éric BIEDI",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "02/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Jules NEMBOT",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "23/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Christian KAFO",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "20/06/2025",
+      "status": "Payé"
+    },
+    {
+      "name": "Jules NEMBOT",
+      "reason": "Trouble",
+      "amount": 2500.0,
+      "date": "20/06/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Alexis Brian",
+      "reason": "Résolution non exécutée",
+      "amount": 10000.0,
+      "date": "23/05/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Loïc KAMENI",
+      "reason": "Trouble",
+      "amount": 2500.0,
+      "date": "11/07/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Jules NEMBOT",
+      "reason": "Retard",
+      "amount": 2500.0,
+      "date": "11/07/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Boris MAKONG",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "11/07/2025",
+      "status": "NP"
+    },
+    {
+      "name": "Nour MAHAMAT",
+      "reason": "Résolution non exécutée",
+      "amount": 5000.0,
+      "date": "11/07/2025",
+      "status": "NP"
+    }
+  ],
+  "key_highlights": [
+    "Le compte rendu précédent a été adopté.",
+    "Les tableaux des résolutions et des sanctions ont été examinés et mis à jour.",
+    "18 GFC relancés avec une baisse des impayés de 6,2%.",
+    "Obtention de 10 licences pour 21 jours pour la gestion des réclamations par FirstCopilot.",
+    "81 agences déployées sur 91 pour le GFA V2.",
+    "641 Millions et 377 Millions de covenant suivis au 04/07/2025.",
+    "4144 opérations TPE la semaine dernière pour 178 millions.",
+    "58% de disponibilité des GAB."
+  ],
+  "miscellaneous": [
+    "Rapport de réunion hebdomadaire à mettre à jour avant 12 H.",
+    "Proposition de réduire la durée des réunions à 02 mins par présentation et 05 mins pour les questions.",
+    "Vladimir fera les rapports du 18/07/2025 et 25/07/2025.",
+    "Le solde indicatif du compte DRI Solidarité est de XAF 934.318 au 18/07/2025."
+  ]
+}
