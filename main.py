@@ -643,6 +643,18 @@ def to_roman(num):
     }
     return roman_numerals.get(num, str(num))
 
+def parse_date_from_filename(filename):
+    """Parse date from filename format: meeting_DD-MM-YYYY_Réunion_DRI.json"""
+    try:
+        # Extract date part from filename like "meeting_23-05-2025_Réunion_DRI.json"
+        if filename.startswith("meeting_") and filename.endswith("_Réunion_DRI.json"):
+            date_part = filename.replace("meeting_", "").replace("_Réunion_DRI.json", "")
+            # Convert DD-MM-YYYY to datetime for proper sorting
+            return datetime.strptime(date_part, "%d-%m-%Y")
+    except:
+        pass
+    return None
+
 def load_historical_meetings(context_dir="processed_meetings", max_meetings=3, exclude_date=None):
     """Load the most recent historical meetings for context and missing data, excluding current meeting date."""
     try:
@@ -663,19 +675,28 @@ def load_historical_meetings(context_dir="processed_meetings", max_meetings=3, e
                         st.info(f"🚫 Excluding current meeting {file} from historical context to avoid circular reference")
                         continue
                 
-                # Get file modification time for sorting
-                mtime = os.path.getmtime(filepath)
-                json_files.append((mtime, filepath, file))
+                # Parse date from filename for proper chronological sorting
+                parsed_date = parse_date_from_filename(file)
+                if parsed_date:
+                    json_files.append((parsed_date, filepath, file))
+                else:
+                    # Fallback to modification time if date parsing fails
+                    mtime = os.path.getmtime(filepath)
+                    json_files.append((datetime.fromtimestamp(mtime), filepath, file))
         
         if not json_files:
             return []
         
-        # Sort by modification time (most recent first) and take the last max_meetings
+        # Sort by date (most recent first) and take the last max_meetings
         json_files.sort(key=lambda x: x[0], reverse=True)
         recent_files = json_files[:max_meetings]
         
+        st.info(f"📅 Loading {len(recent_files)} most recent meetings:")
+        for date_obj, filepath, filename in recent_files:
+            st.info(f"  • {filename} ({date_obj.strftime('%d/%m/%Y')})")
+        
         meetings = []
-        for mtime, filepath, filename in recent_files:
+        for date_obj, filepath, filename in recent_files:
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     meeting_data = json.load(f)
@@ -1368,9 +1389,14 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
 
         # Add activities review (organized by department with headers) - NOW FIRST TABLE
         raw_activities = extracted_info.get("activities_review", [])
-        organized_activities = organize_activities_by_department(raw_activities)
+        if raw_activities is None:
+            raw_activities = []
         
-        st.info(f"📊 Generating activity table organized by departments: {len([a for a in organized_activities if a.get('type') == 'activity'])} activities across {len([a for a in organized_activities if a.get('type') == 'header'])} departments")
+        organized_activities = organize_activities_by_department(raw_activities)
+        if organized_activities is None:
+            organized_activities = []
+        
+        st.info(f"📊 Generating activity table organized by departments: {len([a for a in organized_activities if a and a.get('type') == 'activity'])} activities across {len([a for a in organized_activities if a and a.get('type') == 'header'])} departments")
         
         add_activities_table_with_departments(doc, organized_activities)
         
@@ -1378,6 +1404,9 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
 
         # Add resolutions table (AFTER activities)
         resolutions = extracted_info.get("resolutions_summary", [])
+        if resolutions is None:
+            resolutions = []
+        
         st.info(f"📊 Generating resolutions table with {len(resolutions)} entries")
         
         add_styled_paragraph(doc, "RÉCAPITULATIF DES RÉSOLUTIONS", bold=True, color=RGBColor(192, 0, 0))
@@ -1387,18 +1416,26 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
 
         # Add sanctions (guaranteed to have at least one entry)
         sanctions = extracted_info.get("sanctions_summary", [])
+        if sanctions is None:
+            sanctions = []
+        
         st.info(f"📊 Generating sanctions table with {len(sanctions)} entries")
         
         add_styled_paragraph(doc, "RÉCAPITULATIF DES SANCTIONS", bold=True, color=RGBColor(192, 0, 0))
-        sanctions_data = [[s.get("name", ""), s.get("reason", ""), str(s.get("amount", "")), s.get("date", ""), s.get("status", "")] for s in sanctions]
+        sanctions_data = [[s.get("name", "") if s else "", s.get("reason", "") if s else "", str(s.get("amount", "")) if s else "", s.get("date", "") if s else "", s.get("status", "") if s else ""] for s in sanctions if s is not None]
         add_styled_table(doc, len(sanctions) + 1, 5, ["NOM", "RAISON", "MONTANT (FCFA)", "DATE", "STATUT"], sanctions_data, column_widths=[3.0, 4.5, 3.0, 2.5, 3.0], table_width=16.0)
 
         doc.add_page_break()
         
         # Calculate balance as sum of all sanctions
         sanctions = extracted_info.get("sanctions_summary", [])
+        if sanctions is None:
+            sanctions = []
+        
         total_sanctions = 0
         for sanction in sanctions:
+            if sanction is None:
+                continue
             try:
                 amount = sanction.get("amount", "0")
                 # Handle both string and numeric amounts

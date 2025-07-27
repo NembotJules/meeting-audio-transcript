@@ -202,6 +202,18 @@ class MeetingProcessor:
         self.mistral_api_key = mistral_api_key
         self.context_dir = context_dir
 
+    def parse_date_from_filename(self, filename):
+        """Parse date from filename format: meeting_DD-MM-YYYY_Réunion_DRI.json"""
+        try:
+            # Extract date part from filename like "meeting_23-05-2025_Réunion_DRI.json"
+            if filename.startswith("meeting_") and filename.endswith("_Réunion_DRI.json"):
+                date_part = filename.replace("meeting_", "").replace("_Réunion_DRI.json", "")
+                # Convert DD-MM-YYYY to datetime for proper sorting
+                return datetime.strptime(date_part, "%d-%m-%Y")
+        except:
+            pass
+        return None
+
     def load_historical_context(self, max_meetings: int = 3, exclude_date: str = "") -> str:
         """
         Load the most recent historical meetings as context.
@@ -231,27 +243,32 @@ class MeetingProcessor:
                             print(f"Excluding current meeting {file} from historical context to avoid circular reference")
                             continue
                     
-                    # Get file modification time for sorting
-                    mtime = os.path.getmtime(filepath)
-                    json_files.append((mtime, filepath, file))
+                    # Parse date from filename for proper chronological sorting
+                    parsed_date = self.parse_date_from_filename(file)
+                    if parsed_date:
+                        json_files.append((parsed_date, filepath, file))
+                    else:
+                        # Fallback to modification time if date parsing fails
+                        mtime = os.path.getmtime(filepath)
+                        json_files.append((datetime.fromtimestamp(mtime), filepath, file))
             
             if not json_files:
                 print("No historical meeting files found")
                 return ""
             
-            # Sort by modification time (most recent first) and take the last max_meetings
+            # Sort by date (most recent first) and take the last max_meetings
             json_files.sort(key=lambda x: x[0], reverse=True)
             recent_files = json_files[:max_meetings]
             
             print(f"Loading {len(recent_files)} historical meetings as context:")
             
             context_parts = []
-            for mtime, filepath, filename in recent_files:
+            for date_obj, filepath, filename in recent_files:
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         meeting_data = json.load(f)
                     
-                    print(f"- {filename}")
+                    print(f"- {filename} ({date_obj.strftime('%d/%m/%Y')})")
                     
                     # Format this meeting's data for context
                     context_parts.append(self.format_meeting_context(meeting_data))
@@ -942,14 +959,19 @@ def get_historical_resolution_date(dossier, responsible, resolution_text, contex
                     if exclude_date_formatted in file:
                         continue
                 
-                # Get file modification time for sorting
-                mtime = os.path.getmtime(filepath)
-                json_files.append((mtime, filepath, file))
+                # Parse date from filename for proper chronological sorting
+                parsed_date = self.parse_date_from_filename(file)
+                if parsed_date:
+                    json_files.append((parsed_date, filepath, file))
+                else:
+                    # Fallback to modification time if date parsing fails
+                    mtime = os.path.getmtime(filepath)
+                    json_files.append((datetime.fromtimestamp(mtime), filepath, file))
         
         if not json_files:
             return None
         
-        # Sort by modification time (most recent first)
+        # Sort by date (most recent first)
         json_files.sort(key=lambda x: x[0], reverse=True)
         
         # Collect all dates for this dossier
@@ -957,7 +979,7 @@ def get_historical_resolution_date(dossier, responsible, resolution_text, contex
         search_dossier = dossier.strip().lower()
         
         # Search through historical meetings for matching dossier
-        for mtime, filepath, filename in json_files:
+        for date_obj, filepath, filename in json_files:
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     meeting_data = json.load(f)
