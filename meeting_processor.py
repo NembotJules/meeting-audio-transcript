@@ -425,7 +425,8 @@ class MeetingProcessor:
                 "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
                 "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
                 "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
-                "Charlène GHOMSI"
+                "Charlène GHOMSI", "André TSIMI", "Gilles NGUIMAPI", "Cédric KANKEU",
+                "Vianney NENGOUEYE", "Laurent AMBASSA", "Gaetan FOMEKONG", "Rosa AYENE"
             ]
 
             # 1. Extract attendance (no historical context)
@@ -621,7 +622,8 @@ Pay special attention to:
                 "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
                 "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
                 "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
-                "Charlène GHOMSI"
+                "Charlène GHOMSI", "André TSIMI", "Gilles NGUIMAPI", "Cédric KANKEU",
+                "Vianney NENGOUEYE", "Laurent AMBASSA", "Gaetan FOMEKONG", "Rosa AYENE"
             ]
 
             # 1. Extract attendance with context

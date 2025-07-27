@@ -331,7 +331,8 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
         "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
         "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
-        "Charlène GHOMSI"
+        "Charlène GHOMSI", "André TSIMI", "Gilles NGUIMAPI", "Cédric KANKEU",
+        "Vianney NENGOUEYE", "Laurent AMBASSA", "Gaetan FOMEKONG", "Rosa AYENE"
     ]
     
     # Use the new structure matching historical processor with proper French defaults
@@ -845,6 +846,8 @@ def extract_info(transcription, meeting_title, date, mistral_api_key, previous_c
        - Nour MAHAMAT, Franklin TANDJA, Marcellin SEUJIP, Divine NDE
        - Brian ELLA ELLA, Amelin EPOH, Franklin YOUMBI, Cédric DONFACK
        - Wilfried DOPGANG, Ismaël POUNGOUM, Éric BEIDI, Boris ON MAKONG, Charlène GHOMSI
+       - André TSIMI, Gilles NGUIMAPI, Cédric KANKEU, Vianney NENGOUEYE
+       - Laurent AMBASSA, Gaetan FOMEKONG, Rosa AYENE
        - If not mentioned, use "RAS" for activities, results, and perspectives
     
     3. If the current transcript mentions ongoing sanctions or doesn't specify new sanctions, use the sanctions from the historical context with updated dates.
@@ -1563,11 +1566,11 @@ def smart_historical_data_filling(extracted_data, date, allow_circular=False):
     try:
         # Define department structure for member identification
         department_members = {
-            "DEPARTEMENT INVESTISSEMENT": ["Grace Divine", "Vladimir SOUA", "Nour MAHAMAT", "Eric BEIDI"],
+            "DEPARTEMENT INVESTISSEMENT": ["Grace Divine", "Vladimir SOUA", "Nour MAHAMAT", "Eric BEIDI", "André TSIMI", "Gaetan FOMEKONG", "Rosa AYENE"],
             "DEPARTEMENT PROJET": ["Marcellin SEUJIP", "Franklin TANDJA"],
-            "DEPARTEMENT IA": ["Emmanuel TEINGA", "Sherelle KANA", "Jules NEMBOT", "Brice DZANGUE"],
-            "DEPARTEMENT INNOVATION": ["Jordan KAMSU-KOM", "Christian DJIMELI", "Daniel BAYECK", "Brian ELLA ELLA"],
-            "DEPARTEMENT ETUDE": ["Gael KIAMPI", "Francis KAMSU", "Loïc KAMENI"]
+            "DEPARTEMENT IA": ["Emmanuel TEINGA", "Sherelle KANA", "Jules NEMBOT", "Brice DZANGUE", "Cédric KANKEU"],
+            "DEPARTEMENT INNOVATION": ["Jordan KAMSU-KOM", "Christian DJIMELI", "Daniel BAYECK", "Brian ELLA ELLA", "Gilles NGUIMAPI"],
+            "DEPARTEMENT ETUDE": ["Gael KIAMPI", "Francis KAMSU", "Loïc KAMENI", "Vianney NENGOUEYE", "Laurent AMBASSA"]
         }
         
         # Flatten to get all known team members
@@ -1790,7 +1793,8 @@ def group_activities_by_person_and_dossier(activities_list):
         "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
         "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
         "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
-        "Charlène GHOMSI"
+        "Charlène GHOMSI", "André TSIMI", "Gilles NGUIMAPI", "Cédric KANKEU",
+        "Vianney NENGOUEYE", "Laurent AMBASSA", "Gaetan FOMEKONG", "Rosa AYENE"
     ]
     
     for member in expected_members:
@@ -1858,11 +1862,11 @@ def organize_activities_by_department(activities_list):
     
     # Define department structure based on the screenshots
     departments = {
-        "DEPARTEMENT INVESTISSEMENT": ["Grace Divine", "Vladimir SOUA", "Nour MAHAMAT", "Eric BEIDI"],
+        "DEPARTEMENT INVESTISSEMENT": ["Grace Divine", "Vladimir SOUA", "Nour MAHAMAT", "Eric BEIDI", "André TSIMI", "Gaetan FOMEKONG", "Rosa AYENE"],
         "DEPARTEMENT PROJET": ["Marcellin SEUJIP", "Franklin TANDJA"],
-        "DEPARTEMENT IA": ["Emmanuel TEINGA", "Sherelle KANA", "Jules NEMBOT", "Brice DZANGUE"],
-        "DEPARTEMENT INNOVATION": ["Jordan KAMSU-KOM", "Christian DJIMELI", "Daniel BAYECK", "Brian ELLA ELLA"],
-        "DEPARTEMENT ETUDE": ["Gael KIAMPI", "Francis KAMSU", "Loïc KAMENI"]
+        "DEPARTEMENT IA": ["Emmanuel TEINGA", "Sherelle KANA", "Jules NEMBOT", "Brice DZANGUE", "Cédric KANKEU"],
+        "DEPARTEMENT INNOVATION": ["Jordan KAMSU-KOM", "Christian DJIMELI", "Daniel BAYECK", "Brian ELLA ELLA", "Gilles NGUIMAPI"],
+        "DEPARTEMENT ETUDE": ["Gael KIAMPI", "Francis KAMSU", "Loïc KAMENI", "Vianney NENGOUEYE", "Laurent AMBASSA"]
     }
     
     # Group activities by actor first
@@ -2278,7 +2282,8 @@ def enhance_resolutions_with_history(extracted_data, date):
             "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
             "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
             "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
-            "Charlène GHOMSI"
+            "Charlène GHOMSI", "André TSIMI", "Gilles NGUIMAPI", "Cédric KANKEU",
+            "Vianney NENGOUEYE", "Laurent AMBASSA", "Gaetan FOMEKONG", "Rosa AYENE"
         ]
         
         # Find members missing from current resolutions
