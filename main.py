@@ -366,34 +366,67 @@ def extract_info_fallback(transcription, meeting_title, date, previous_context="
         "balance_date": date
     }
 
-    # Extract presence list
+    # Smart attendance detection based on speaker identification
+    expected_members = [
+        "Grace Divine", "Vladimir SOUA", "Gael KIAMPI", "Emmanuel TEINGA",
+        "Francis KAMSU", "Jordan KAMSU-KOM", "Loïc KAMENI", "Christian DJIMELI",
+        "Daniel BAYECK", "Brice DZANGUE", "Sherelle KANA", "Jules NEMBOT",
+        "Nour MAHAMAT", "Franklin TANDJA", "Marcellin SEUJIP", "Divine NDE",
+        "Brian ELLA ELLA", "Amelin EPOH", "Franklin YOUMBI", "Cédric DONFACK",
+        "Wilfried DOPGANG", "Ismaël POUNGOUM", "Éric BEIDI", "Boris ON MAKONG",
+        "Charlène GHOMSI", "André TSIMI", "Gilles NGUIMAPI", "Cédric KANKEU",
+        "Vianney NENGOUEYE", "Laurent AMBASSA", "Gaetan FOMEKONG", "Rosa AYENE"
+    ]
+    
+    # First try to extract explicit attendance lists
     present_match = re.search(r"(Présents|Présent|Présentes|Présente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
     absent_match = re.search(r"(Absents|Absent|Absentes|Absente)[:\s]*([^\n]+)", transcription, re.IGNORECASE)
     
-    # Debug attendance extraction
-    if present_match:
-        st.info(f"🔍 Found Present: '{present_match.group(2).strip()}'")
-    if absent_match:
-        st.info(f"🔍 Found Absent: '{absent_match.group(2).strip()}'")
-    
     if present_match or absent_match:
+        # Use explicit attendance if found
         present = present_match.group(2).strip() if present_match else ""
         absent = absent_match.group(2).strip() if absent_match else ""
         extracted_data["attendance"]["present"] = [name.strip() for name in present.split(",") if name.strip()] if present else []
         extracted_data["attendance"]["absent"] = [name.strip() for name in absent.split(",") if name.strip()] if absent else []
         
-        # Debug parsed attendance
-        st.info(f"🔍 Parsed Present: {extracted_data['attendance']['present']}")
-        st.info(f"🔍 Parsed Absent: {extracted_data['attendance']['absent']}")
+        st.info(f"🔍 Explicit attendance found - Present: {extracted_data['attendance']['present']}")
+        st.info(f"🔍 Explicit attendance found - Absent: {extracted_data['attendance']['absent']}")
     else:
-        # Fallback method if no explicit attendance found
-        names = re.findall(r"\b[A-Z][a-z]+(?: [A-Z][a-z]+)?\b", transcription)
-        common_words = {"Réunion", "Projet", "Président", "Rapporteur", "Solde", "Compte", "Ordre", "Agenda"}
-        names = [name for name in set(names) if name not in common_words]
-        if names:
-            extracted_data["attendance"]["present"] = names
-            extracted_data["attendance"]["absent"] = []
-            st.warning(f"🔍 Fallback attendance - found names: {names}")
+        # Smart detection: who spoke in the meeting = who was present
+        present_members = set()
+        
+        # Look for speaker patterns: "Name:" or "Name said" or "Name mentioned"
+        for member in expected_members:
+            member_patterns = [
+                rf"{re.escape(member)}\s*:",  # "Name:"
+                rf"{re.escape(member)}\s+(?:said|mentioned|reported|presented|stated)",  # "Name said"
+                rf"(?:said by|from|by)\s+{re.escape(member)}",  # "said by Name"
+            ]
+            
+            # Also check for first names and last names separately
+            name_parts = member.split()
+            if len(name_parts) >= 2:
+                first_name = name_parts[0]
+                last_name = name_parts[-1]
+                member_patterns.extend([
+                    rf"{re.escape(first_name)}\s*:",
+                    rf"{re.escape(last_name)}\s*:",
+                    rf"{re.escape(first_name)}\s+(?:said|mentioned|reported|presented|stated)",
+                    rf"{re.escape(last_name)}\s+(?:said|mentioned|reported|presented|stated)",
+                ])
+            
+            # Check if any pattern matches
+            for pattern in member_patterns:
+                if re.search(pattern, transcription, re.IGNORECASE):
+                    present_members.add(member)
+                    break
+        
+        # Create attendance lists
+        extracted_data["attendance"]["present"] = list(present_members)
+        extracted_data["attendance"]["absent"] = [member for member in expected_members if member not in present_members]
+        
+        st.info(f"🎯 Smart attendance detection - Present ({len(present_members)}): {sorted(present_members)}")
+        st.info(f"🎯 Smart attendance detection - Absent ({len(extracted_data['attendance']['absent'])}): {sorted(extracted_data['attendance']['absent'])}")
 
     # Extract agenda items - only if explicitly mentioned, otherwise keep defaults
     agenda_match = re.search(r"(Ordre du jour|Agenda)[:\s]*([\s\S]*?)(?=\n[A-Z]+:|\Z)", transcription, re.IGNORECASE)
@@ -886,7 +919,7 @@ def extract_info(transcription, meeting_title, date, mistral_api_key, previous_c
             "present": ["list of present attendees"],
             "absent": ["list of absent attendees"]
         }},
-        "agenda_items": ["I- Relecture du Compte Rendu", "II- Récapitulatif des Résolutions et des Sanctions", "III- Revue d'activités", "IV- Faits Saillants", "V- Divers"],
+        "agenda_items": ["I- Relecture du Compte Rendu", "II- Revue d'activités", "III- Récapitulatif des Résolutions et des Sanctions", "IV- Faits Saillants", "V- Divers"],
         "activities_review": [
             {{
                 "actor": "person name",
@@ -1356,8 +1389,8 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
             # Fallback to French defaults
             french_agenda = [
                 "I- Relecture du compte rendu et adoption",
-                "II- Récapitulatif des résolutions et sanctions",
-                "III- Revue d'activités",
+                "II- Revue d'activités",
+                "III- Récapitulatif des résolutions et sanctions",
                 "IV- Faits saillants",
                 "V- Divers"
             ]
@@ -1374,17 +1407,12 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         add_styled_paragraph(doc, "I. Relecture du Compte-rendu", bold=True, font_size=14, color=RGBColor(0, 0, 0))
         add_styled_paragraph(doc, "Le compte rendu précédent n'a pas été adopté et validé.", font_size=12)
         doc.add_paragraph()  # Add spacing
-        
-        # Add section II header  
-        add_styled_paragraph(doc, "II. Récapitulatif des résolutions et sanctions", bold=True, font_size=14, color=RGBColor(0, 0, 0))
-        add_styled_paragraph(doc, "Les tableaux des résolutions et des sanctions ont été examinés et mis à jour.", font_size=12)
-        doc.add_paragraph()  # Add spacing
 
-        # PAGE BREAK HERE - so Section III starts on new page
+        # PAGE BREAK HERE - so Section II (Activities) starts on new page
         doc.add_page_break()
         
-        # Add section III header - Activity Review FIRST
-        add_styled_paragraph(doc, "III. Revue d'activités", bold=True, font_size=14, color=RGBColor(0, 0, 0))
+        # Add section II header - Activity Review SECOND
+        add_styled_paragraph(doc, "II. Revue d'activités", bold=True, font_size=14, color=RGBColor(0, 0, 0))
         doc.add_paragraph()  # Add spacing
 
         # Add activities review (organized by department with headers) - NOW FIRST TABLE
@@ -1401,6 +1429,11 @@ def fill_template_and_generate_docx(extracted_info, meeting_title, meeting_date)
         add_activities_table_with_departments(doc, organized_activities)
         
         doc.add_page_break()
+
+        # Add section III header - Resolutions and Sanctions
+        add_styled_paragraph(doc, "III. Récapitulatif des résolutions et sanctions", bold=True, font_size=14, color=RGBColor(0, 0, 0))
+        add_styled_paragraph(doc, "Les tableaux des résolutions et des sanctions ont été examinés et mis à jour.", font_size=12)
+        doc.add_paragraph()  # Add spacing
 
         # Add resolutions table (AFTER activities)
         resolutions = extracted_info.get("resolutions_summary", [])
@@ -2461,7 +2494,7 @@ def add_resolutions_table_with_overdue_highlighting(doc, resolutions, current_me
     set_column_widths(table, column_widths)
     
     # Add headers
-    headers = ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "COMPTE RENDU"]
+    headers = ["DATE", "DOSSIER", "RÉSOLUTION", "RESP.", "ÉCHÉANCE", "DATE D'EXÉCUTION", "STATUT", "NBRE DE REPORT"]
     for j, header in enumerate(headers):
         cell = table.cell(0, j)
         cell.text = header
@@ -2525,27 +2558,23 @@ def add_resolutions_table_with_overdue_highlighting(doc, resolutions, current_me
 
 def convert_time_format(time_str):
     """
-    Convert time from various formats to French format (HHhMMmin).
+    Convert time from various formats to French format (HHhMMmin) with +1 hour timezone adjustment.
     
     Args:
         time_str: Time in formats like "06:08AM", "6:08 AM", "06h08min", etc.
         
     Returns:
-        Time in French format "06h08min" or original if conversion fails
+        Time in French format "06h08min" with +1 hour adjustment or original if conversion fails
     """
     if not time_str or time_str == "Non spécifié":
         return "Non spécifié"
     
     try:
         import re
-        from datetime import datetime
+        from datetime import datetime, timedelta
         
         # Remove extra spaces
         time_str = time_str.strip()
-        
-        # If already in French format, return as is
-        if re.match(r'\d{1,2}h\d{2}min?', time_str, re.IGNORECASE):
-            return time_str
         
         # Handle AM/PM format: "06:08AM", "6:08 AM", etc.
         am_pm_pattern = r'(\d{1,2}):(\d{2})\s*(AM|PM)'
@@ -2563,7 +2592,11 @@ def convert_time_format(time_str):
                 if hour != 12:
                     hour += 12
             
-            return f"{hour:02d}h{minute:02d}min"
+            # Add +1 hour for timezone adjustment
+            time_obj = datetime.strptime(f"{hour:02d}:{minute:02d}", "%H:%M")
+            time_obj += timedelta(hours=1)
+            
+            return f"{time_obj.hour:02d}h{time_obj.minute:02d}min"
         
         # Handle 24-hour format: "14:30", "14:30:00"
         time_24h_pattern = r'(\d{1,2}):(\d{2})(?::\d{2})?'
@@ -2571,7 +2604,25 @@ def convert_time_format(time_str):
         if match:
             hour = int(match.group(1))
             minute = int(match.group(2))
-            return f"{hour:02d}h{minute:02d}min"
+            
+            # Add +1 hour for timezone adjustment
+            time_obj = datetime.strptime(f"{hour:02d}:{minute:02d}", "%H:%M")
+            time_obj += timedelta(hours=1)
+            
+            return f"{time_obj.hour:02d}h{time_obj.minute:02d}min"
+        
+        # Handle existing French format: "14h30min" - still apply +1 hour
+        french_pattern = r'(\d{1,2})h(\d{2})min?'
+        match = re.match(french_pattern, time_str, re.IGNORECASE)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            
+            # Add +1 hour for timezone adjustment
+            time_obj = datetime.strptime(f"{hour:02d}:{minute:02d}", "%H:%M")
+            time_obj += timedelta(hours=1)
+            
+            return f"{time_obj.hour:02d}h{time_obj.minute:02d}min"
         
         # If no pattern matches, return original
         return time_str

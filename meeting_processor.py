@@ -446,10 +446,15 @@ class MeetingProcessor:
                 "Vianney NENGOUEYE", "Laurent AMBASSA", "Gaetan FOMEKONG", "Rosa AYENE"
             ]
 
-            # 1. Extract attendance (no historical context)
+            # 1. Extract attendance with smart speaker detection
             attendance_prompt = f"""
-Extract ONLY the attendance information from the meeting note.
-Expected team members: {', '.join(expected_members)}
+Extract attendance information from the meeting note using smart detection:
+
+1. FIRST: Look for explicit attendance lists (Présents/Absents)
+2. IF NOT FOUND: Detect who spoke during the meeting from speaker patterns like "Name:" or "Name said"
+3. Expected team members: {', '.join(expected_members)}
+4. Anyone who spoke = Present, anyone who didn't speak = Absent
+
 Return as two lists in this EXACT format (no other text):
 {{"present": ["name1", "name2"], "absent": ["name3", "name4"]}}
 
@@ -464,13 +469,13 @@ Meeting Note:
 Extract ONLY the agenda items from the meeting note.
 IMPORTANT: Unless explicitly mentioned differently, use these French defaults:
 - "I- Relecture du Compte Rendu"
-- "II- Récapitulatif des Résolutions et des Sanctions"
-- "III- Revue d'activités"
+- "II- Revue d'activités"
+- "III- Récapitulatif des Résolutions et des Sanctions"
 - "IV- Faits Saillants"
 - "V- Divers"
 
 Return as a list in this EXACT format (no other text):
-{{"agenda_items": ["I- Relecture du Compte Rendu", "II- Récapitulatif des Résolutions et des Sanctions", "III- Revue d'activités", "IV- Faits Saillants", "V- Divers"]}}
+{{"agenda_items": ["I- Relecture du Compte Rendu", "II- Revue d'activités", "III- Récapitulatif des Résolutions et des Sanctions", "IV- Faits Saillants", "V- Divers"]}}
 
 Meeting Note:
 {text}
@@ -478,8 +483,8 @@ Meeting Note:
             agenda_response = self._make_api_call(agenda_prompt)
             agenda_data = safe_parse_json(agenda_response, {"agenda_items": [
                 "I- Relecture du Compte Rendu",
-                "II- Récapitulatif des Résolutions et des Sanctions", 
-                "III- Revue d'activités",
+                "II- Revue d'activités", 
+                "III- Récapitulatif des Résolutions et des Sanctions",
                 "IV- Faits Saillants",
                 "V- Divers"
             ]})
@@ -567,8 +572,8 @@ Meeting Note:
                 "attendance": attendance_data,
                 "agenda_items": agenda_data.get("agenda_items", [
                     "I- Relecture du Compte Rendu",
-                    "II- Récapitulatif des Résolutions et des Sanctions",
-                    "III- Revue d'activités", 
+                    "II- Revue d'activités", 
+                    "III- Récapitulatif des Résolutions et des Sanctions",
                     "IV- Faits Saillants",
                     "V- Divers"
                 ]),
@@ -643,12 +648,17 @@ Pay special attention to:
                 "Vianney NENGOUEYE", "Laurent AMBASSA", "Gaetan FOMEKONG", "Rosa AYENE"
             ]
 
-            # 1. Extract attendance with context
+            # 1. Extract attendance with context and smart speaker detection
             attendance_prompt = f"""
 {context_instruction}
-Extract ONLY the attendance information from the meeting note.
-Consider people mentioned in the historical context above.
-Expected team members: {', '.join(expected_members)}
+Extract attendance information from the meeting note using smart detection:
+
+1. FIRST: Look for explicit attendance lists (Présents/Absents)
+2. IF NOT FOUND: Detect who spoke during the meeting from speaker patterns like "Name:" or "Name said"
+3. Consider people mentioned in the historical context above
+4. Expected team members: {', '.join(expected_members)}
+5. Anyone who spoke = Present, anyone who didn't speak = Absent
+
 Return as two lists in this EXACT format (no other text):
 {{"present": ["name1", "name2"], "absent": ["name3", "name4"]}}
 
@@ -664,13 +674,13 @@ Meeting Note:
 Extract ONLY the agenda items from the meeting note.
 IMPORTANT: Unless explicitly mentioned differently, use these French defaults:
 - "I- Relecture du Compte Rendu"
-- "II- Récapitulatif des Résolutions et des Sanctions"
-- "III- Revue d'activités"
+- "II- Revue d'activités"
+- "III- Récapitulatif des Résolutions et des Sanctions"
 - "IV- Faits Saillants"
 - "V- Divers"
 
 Return as a list in this EXACT format (no other text):
-{{"agenda_items": ["I- Relecture du Compte Rendu", "II- Récapitulatif des Résolutions et des Sanctions", "III- Revue d'activités", "IV- Faits Saillants", "V- Divers"]}}
+{{"agenda_items": ["I- Relecture du Compte Rendu", "II- Revue d'activités", "III- Récapitulatif des Résolutions et des Sanctions", "IV- Faits Saillants", "V- Divers"]}}
 
 Meeting Note:
 {text}
@@ -678,8 +688,8 @@ Meeting Note:
             agenda_response = self._make_api_call(agenda_prompt)
             agenda_data = safe_parse_json(agenda_response, {"agenda_items": [
                 "I- Relecture du Compte Rendu",
-                "II- Récapitulatif des Résolutions et des Sanctions", 
-                "III- Revue d'activités",
+                "II- Revue d'activités", 
+                "III- Récapitulatif des Résolutions et des Sanctions",
                 "IV- Faits Saillants",
                 "V- Divers"
             ]})
@@ -795,8 +805,8 @@ Meeting Note:
                 "attendance": attendance_data,
                 "agenda_items": agenda_data.get("agenda_items", [
                     "I- Relecture du Compte Rendu",
-                    "II- Récapitulatif des Résolutions et des Sanctions",
-                    "III- Revue d'activités", 
+                    "II- Revue d'activités", 
+                    "III- Récapitulatif des Résolutions et des Sanctions",
                     "IV- Faits Saillants",
                     "V- Divers"
                 ]),
